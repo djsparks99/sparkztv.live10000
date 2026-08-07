@@ -181,6 +181,43 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+function saveBase64ToUploads(base64Str: string | null | undefined): string | null {
+  if (!base64Str || typeof base64Str !== "string") {
+    return base64Str || null;
+  }
+
+  // Check if it is a base64 data URI
+  if (!base64Str.startsWith("data:image/")) {
+    return base64Str;
+  }
+
+  try {
+    const matches = base64Str.match(/^data:image\/([A-Za-z0-9+]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return base64Str;
+    }
+
+    let ext = matches[1].toLowerCase();
+    // Normalize extensions
+    if (ext === "jpeg" || ext === "jpg+xml") ext = "jpg";
+    if (ext === "svg+xml") ext = "svg";
+    
+    const dataBuffer = Buffer.from(matches[2], "base64");
+    
+    // Generate a unique file name
+    const filename = `${crypto.randomUUID()}.${ext}`;
+    const filePath = path.join(uploadsDir, filename);
+    
+    fs.writeFileSync(filePath, dataBuffer);
+    console.log(`[Base64 Upload] Successfully saved base64 image to disk: ${filePath} (${dataBuffer.length} bytes)`);
+    
+    return `/api/files/${filename}`;
+  } catch (err: any) {
+    console.error("[Base64 Upload] Failed to parse or save base64 image to disk:", err.message);
+    return base64Str;
+  }
+}
+
 const upload = multer({
   dest: uploadsDir,
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -696,7 +733,7 @@ async function startServer() {
         db.users.set(user.uid, user);
       }
       if (req.body?.social_share_image_url !== undefined) {
-        user.social_share_image_url = req.body.social_share_image_url;
+        user.social_share_image_url = saveBase64ToUploads(req.body.social_share_image_url);
         db.users.set(user.uid, user);
       }
 
@@ -957,6 +994,8 @@ async function startServer() {
         photoUrl = req.body.photo_url || req.body.photoUrl || req.body.photo || req.body.avatar || req.body.image;
       }
 
+      photoUrl = saveBase64ToUploads(photoUrl);
+
       user.photo_url = photoUrl;
       db.users.set(user.uid, user);
 
@@ -1003,6 +1042,8 @@ async function startServer() {
         socialShareUrl = req.body.social_share_image_url || req.body.socialShareImageUrl || req.body.image;
       }
 
+      socialShareUrl = saveBase64ToUploads(socialShareUrl);
+
       user.social_share_image_url = socialShareUrl;
       db.users.set(user.uid, user);
 
@@ -1037,6 +1078,8 @@ async function startServer() {
       } else if (req.body?.thumbnail || req.body?.image || req.body?.file) {
         thumbnailUrl = req.body.thumbnail || req.body.image || req.body.file;
       }
+
+      thumbnailUrl = saveBase64ToUploads(thumbnailUrl);
 
       channel.thumbnail_url = thumbnailUrl;
 
