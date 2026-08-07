@@ -250,6 +250,7 @@ class InMemStore {
 const db = new InMemStore();
 
 const activeViewersPerRoom = new Map<string, Set<string>>();
+const viewCache = new Map<string, number>();
 
 const DUMMY_USERNAMES = [
   "pirate_fm", "acid_vault", "dub_station", "test", "demo", "undefined", "null", "dummy", "user", "channel"
@@ -774,6 +775,89 @@ async function startServer() {
   api.patch("/channels/mine", handleChannelUpdate);
   api.put("/channels/mine", handleChannelUpdate);
   api.post("/channels/mine", handleChannelUpdate);
+
+  // Dynamic and robust IP-based channel view tracking with cooldown timers to prevent page refresh inflation
+  api.post("/channels/:id/view", async (req: any, res: Response) => {
+    try {
+      const requestedId = req.params.id;
+      const normalizedId = (requestedId || "").toLowerCase().trim();
+
+      // Find the channel doc (works with both ID and username parameters)
+      let matchedChannel: ChannelDoc | undefined = db.channels.get(requestedId) || Array.from(db.channels.values()).find(
+        (c) => (c.username || "").toLowerCase() === normalizedId
+      );
+
+      if (!matchedChannel && (normalizedId === "djsparkz" || normalizedId === "nsu1v44xfnn3flojvnepqj6cbg2")) {
+        matchedChannel = await getMasterChannel();
+      }
+
+      if (!matchedChannel) {
+        return res.status(404).json({ error: "Channel not found" });
+      }
+
+      const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+      const ip = (typeof clientIp === "string" ? clientIp.split(",")[0] : String(clientIp)).trim();
+      
+      const channelId = matchedChannel.channel_id || "djsparkz";
+      const cacheKey = `${channelId}:${ip}`;
+      const now = Date.now();
+      
+      // Cooldown set to 5 minutes to prevent page refresh view inflation
+      const COOLDOWN_MS = 5 * 60 * 1000; 
+      
+      const lastViewTime = viewCache.get(cacheKey);
+      let incremented = false;
+
+      if (!lastViewTime || (now - lastViewTime) >= COOLDOWN_MS) {
+        viewCache.set(cacheKey, now);
+        // Increment count
+        matchedChannel.viewer_count = (matchedChannel.viewer_count || 0) + 1;
+        incremented = true;
+        console.log(`[View Tracker] IP ${ip} successfully tracked for channel ${channelId}. Count: ${matchedChannel.viewer_count}`);
+
+        // Persist to Firestore if initialized
+        if (dbFirestore) {
+          try {
+            const docId = matchedChannel.user_uid || matchedChannel.channel_id || matchedChannel.username;
+            if (docId) {
+              await dbFirestore.collection("channels").doc(docId).set({
+                viewer_count: matchedChannel.viewer_count,
+                last_updated: new Date().toISOString()
+              }, { merge: true });
+              
+              // Ensure master alias "djsparkz" doc is also in sync
+              if (normalizedId === "djsparkz" || matchedChannel.username === "djsparkz") {
+                await dbFirestore.collection("channels").doc("djsparkz").set({
+                  viewer_count: matchedChannel.viewer_count,
+                  last_updated: new Date().toISOString()
+                }, { merge: true });
+              }
+            }
+          } catch (fsErr: any) {
+            console.error(`[View Tracker] Firestore update failed:`, fsErr.message);
+          }
+        }
+      } else {
+        const secondsRemaining = Math.ceil((COOLDOWN_MS - (now - lastViewTime)) / 1000);
+        console.log(`[View Tracker] Skipping view increment for IP ${ip} on channel ${channelId} (Cooldown active: ${secondsRemaining}s remaining)`);
+      }
+
+      // Calculate total viewers (incorporating websocket live occupants + base viewer count)
+      const roomName = matchedChannel.username || "djsparkz";
+      const roomViewers = activeViewersPerRoom.get(roomName);
+      const trueViewerCount = roomViewers ? roomViewers.size : (matchedChannel.viewer_count || 0);
+
+      return res.json({ 
+        success: true, 
+        viewer_count: trueViewerCount, 
+        incremented,
+        ip_tracked: ip
+      });
+    } catch (err: any) {
+      console.error("[View Tracker] Error processing channel view:", err.message);
+      return res.status(500).json({ error: "Failed to process channel view" });
+    }
+  });
 
   api.get("/channels/mine/schedules", async (req, res) => {
     try {
