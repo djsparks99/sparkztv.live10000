@@ -1081,6 +1081,119 @@ async function startServer() {
     return res.status(404).send("Not Found");
   });
 
+  // Dynamic feed.xml generator from recent stream metadata records in Firestore (with in-memory fallback)
+  app.get("/feed.xml", async (req, res) => {
+    const protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+    const host = req.get("host") || "sparkztv.live";
+    const baseUrl = `${protocol}://${host}`;
+
+    let channels: any[] = [];
+    if (dbFirestore) {
+      try {
+        const snapshot = await dbFirestore.collection("channels").get();
+        snapshot.forEach((doc: any) => {
+          const data = doc.data();
+          if (data && data.username) {
+            channels.push({ id: doc.id, ...data });
+          }
+        });
+        console.log(`[feed.xml] Dynamically fetched ${channels.length} channels from Firestore.`);
+      } catch (err: any) {
+        console.error("[feed.xml] Error fetching channels from Firestore, falling back to local store:", err.message);
+      }
+    }
+
+    // Fallback to in-memory channels if Firestore is unavailable, empty, or fails
+    if (channels.length === 0) {
+      for (const cDoc of db.channels.values()) {
+        const username = (cDoc.username || "").toLowerCase().trim();
+        if (username && username !== "undefined" && username !== "null" && !isDummyOrInvalid(cDoc)) {
+          channels.push(channelPublic(cDoc));
+        }
+      }
+      console.log(`[feed.xml] Fallback: loaded ${channels.length} channels from in-memory store.`);
+    }
+
+    // Sort by last_updated or updated_at (newest first)
+    channels.sort((a, b) => {
+      const dateA = new Date(a.last_updated || a.updated_at || 0).getTime();
+      const dateB = new Date(b.last_updated || b.updated_at || 0).getTime();
+      return dateB - dateA;
+    });
+
+    // XML escape helper
+    const escapeXml = (unsafe: string): string => {
+      if (!unsafe) return "";
+      return unsafe.replace(/[<>&'"]/g, (c) => {
+        switch (c) {
+          case "<": return "&lt;";
+          case ">": return "&gt;";
+          case "&": return "&amp;";
+          case "'": return "&apos;";
+          case "\"": return "&quot;";
+          default: return c;
+        }
+      });
+    };
+
+    // Build XML RSS items
+    let itemsXml = "";
+    if (channels.length > 0) {
+      for (const chan of channels) {
+        const username = chan.username || chan.id;
+        if (!username) continue;
+
+        const displayName = chan.display_name || username;
+        const streamTitle = chan.stream_title || `${displayName}'s Live Stream`;
+        const category = chan.category || "music";
+        const isLive = chan.is_live || chan.isLive || false;
+        
+        const title = `${escapeXml(displayName)} - ${escapeXml(streamTitle)}`;
+        const link = `${baseUrl}/channel/${encodeURIComponent(username)}`;
+        const status = isLive ? "[LIVE]" : "[OFFLINE]";
+        const description = `${status} ${escapeXml(streamTitle)} - Genre/Category: ${escapeXml(category)}. Tune in to the signal on Sparkz.TV.`;
+        
+        const rawDate = chan.last_updated || chan.updated_at;
+        const pubDate = rawDate ? new Date(rawDate).toUTCString() : new Date().toUTCString();
+
+        itemsXml += `
+    <item>
+      <title>${title}</title>
+      <link>${link}</link>
+      <description>${description}</description>
+      <pubDate>${pubDate}</pubDate>
+      <guid isPermaLink="true">${link}</guid>
+    </item>`;
+      }
+    } else {
+      // Minimal placeholder item if completely empty
+      itemsXml = `
+    <item>
+      <title>Sparkz.TV Underground Network Live Streams</title>
+      <link>${baseUrl}/directory</link>
+      <description>Tune in to live broadcasts from independent DJs and underground pirate stations across the globe.</description>
+      <pubDate>${new Date().toUTCString()}</pubDate>
+      <guid>${baseUrl}/directory</guid>
+    </item>`;
+    }
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Sparkz.TV — Underground Live Broadcasts</title>
+    <link>${baseUrl}/</link>
+    <description>Live underground DJ sets, radio broadcasts, jungle, techno, and dub streams on Sparkz.TV.</description>
+    <language>en-us</language>
+    <atom:link href="${baseUrl}/feed.xml" rel="self" type="application/rss+xml" />${itemsXml}
+  </channel>
+</rss>
+`;
+
+    res.setHeader("Content-Type", "application/xml");
+    res.setHeader("Cache-Control", "public, max-age=60"); // Cache for 1 minute
+    return res.status(200).send(xml);
+  });
+
   const distPath = path.join(process.cwd(), "dist");
   const publicPath = path.join(process.cwd(), "public");
 
