@@ -1,0 +1,138 @@
+{
+  "version": "1.0",
+  "collections": {
+    "users": {
+      "path": "users/{userId}",
+      "description": "User profile information with permanent locked username",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.uid == userId",
+        "update": "request.auth != null && request.auth.uid == userId",
+        "delete": "false"
+      },
+      "fields": {
+        "uid": { "type": "string", "required": true },
+        "email": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "username_locked": { "type": "boolean", "required": true },
+        "photo_url": { "type": "string", "required": false },
+        "social_share_image_url": { "type": "string", "required": false },
+        "bio": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "channels": {
+      "path": "channels/{userId}",
+      "description": "Live streaming channels",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.uid == userId",
+        "update": "request.auth != null && request.auth.uid == userId",
+        "delete": "false"
+      },
+      "fields": {
+        "uid": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "livepeer_stream_id": { "type": "string", "required": true },
+        "stream_key": { "type": "string", "required": true },
+        "playback_id": { "type": "string", "required": true },
+        "updated_at": { "type": "timestamp", "required": true }
+      }
+    },
+    "chat_messages": {
+      "path": "chat_messages/{messageId}",
+      "description": "Live chat messages per channel",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "false"
+      },
+      "fields": {
+        "channel_username": { "type": "string", "required": true },
+        "text": { "type": "string", "required": true },
+        "sender_uid": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "shoutbox": {
+      "path": "shoutbox/{shoutId}",
+      "description": "Pirate radio frequency shoutbox ticker messages",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "false"
+      },
+      "fields": {
+        "text": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "lounge_messages": {
+      "path": "lounge_messages/{messageId}",
+      "description": "Real-time chat messages inside The Lounge hangout room",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "text": { "type": "string", "required": true },
+        "sender_uid": { "type": "string", "required": true },
+        "sender_username": { "type": "string", "required": true },
+        "sender_display_name": { "type": "string", "required": true },
+        "sender_photo_url": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "lounge_mixes": {
+      "path": "lounge_mixes/{mixId}",
+      "description": "Music mixes and track links posted by Lounge members",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "request.auth != null && request.auth.uid == resource.data.uid",
+        "delete": "request.auth != null && (request.auth.uid == resource.data.uid || request.auth.token.email == 'markysparks99@gmail.com')"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "uid": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "photo_url": { "type": "string", "required": false },
+        "title": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
+    },
+    "lounge_featured": {
+      "path": "lounge_featured/{trackId}",
+      "description": "Featured tracks pinned to the Lounge by the host/admin",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "update": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "delete": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "url": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "pinned": { "type": "boolean", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
+    }
+  }
+}

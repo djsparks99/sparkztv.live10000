@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Premium Neon Yellow Glow Filter -->
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+      <feComponentTransfer in="blur" result="glow">
+        <feFuncA type="linear" slope="0.65" />
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Subtle gradient for the main bubble fill to look high-definition -->
+    <linearGradient id="bubbleFillGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f2ff44" />
+      <stop offset="100%" stop-color="#d4eb00" />
+    </linearGradient>
+
+    <!-- Soft glow gradient for the eye glints -->
+    <radialGradient id="glintGrad" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f0f0f0" />
+    </radialGradient>
+  </defs>
+
+  <!-- BACKGROUND GLOW: Soft neon yellow backdrop bloom -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#e5ff00" 
+    stroke="#e5ff00" 
+    stroke-width="36" 
+    stroke-linejoin="round" 
+    filter="url(#neonGlow)" 
+    opacity="0.45" 
+  />
+
+  <!-- LAYER 1: Thick Outer Crisp White Border -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#ffffff" 
+    stroke="#ffffff" 
+    stroke-width="26" 
+    stroke-linejoin="round" 
+  />
+
+  <!-- LAYER 2: Sleek Dark Outline (Creates the high-contrast separation) -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="#121214" 
+    stroke="#121214" 
+    stroke-width="12" 
+    stroke-linejoin="round" 
+  />
+
+  <!-- LAYER 3: Main Solid Neon Yellow/Green Chat Bubble Fill -->
+  <path 
+    d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
+    fill="url(#bubbleFillGrad)" 
+  />
+
+  <!-- MASCOT EYES -->
+  <g>
+    <!-- LEFT EYE -->
+    <!-- Base black iris -->
+    <circle cx="205" cy="225" r="32" fill="#000000" />
+    <!-- Primary white glint -->
+    <circle cx="215" cy="215" r="10" fill="url(#glintGrad)" />
+    <!-- Secondary soft glint -->
+    <circle cx="195" cy="237" r="5" fill="#ffffff" opacity="0.9" />
+
+    <!-- RIGHT EYE -->
+    <!-- Base black iris -->
+    <circle cx="307" cy="225" r="32" fill="#000000" />
+    <!-- Primary white glint -->
+    <circle cx="317" cy="215" r="10" fill="url(#glintGrad)" />
+    <!-- Secondary soft glint -->
+    <circle cx="297" cy="237" r="5" fill="#ffffff" opacity="0.9" />
+  </g>
+</svg>
