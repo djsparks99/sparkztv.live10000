@@ -1261,7 +1261,7 @@ async function startServer() {
 
       let title = "SPARKZ.TV // Your Stream, Your Mix, Your Rules";
       let description = "Decentralized broadcast protocol. No censorship. Full control. Watch live streams from the world's best underground DJs.";
-      let image = `${protocol}://${host}/og-image.jpg`;
+      let image = `https://${host}/og-image.jpg`;
       const url = `${protocol}://${host}${req.originalUrl}`;
 
       if (req.path.startsWith("/channel/")) {
@@ -1301,7 +1301,7 @@ async function startServer() {
               }
             }
 
-            // If firestore is available, fetch the user record dynamically to be real-time
+            // Fetch real-time record from Firestore if available
             if (dbFirestore && matchedChannel.user_uid) {
               try {
                 const userDocSnap = await dbFirestore.collection("users").doc(matchedChannel.user_uid).get();
@@ -1311,8 +1311,8 @@ async function startServer() {
                     if (uData.social_share_image_url) {
                       socialShareUrl = uData.social_share_image_url;
                     }
-                    if (uData.photo_url) {
-                      rawPhoto = uData.photo_url;
+                    if (uData.photo_url || uData.photoUrl || uData.avatar) {
+                      rawPhoto = uData.photo_url || uData.photoUrl || uData.avatar;
                     }
                   }
                 }
@@ -1325,27 +1325,33 @@ async function startServer() {
               socialShareUrl = assocUser.social_share_image_url || null;
             }
             if (!rawPhoto) {
-              rawPhoto = matchedChannel.photo_url || matchedChannel.thumbnail_url || (assocUser ? assocUser.photo_url : null);
+              rawPhoto = matchedChannel.photo_url || matchedChannel.photoUrl || matchedChannel.avatar || matchedChannel.thumbnail_url || (assocUser ? (assocUser.photo_url || assocUser.social_share_image_url) : null);
             }
 
-            // Prioritize custom social share image URL, falling back to standard profile photo or banner
-            let targetImage = socialShareUrl || rawPhoto;
+            // Prioritize custom social share image URL, falling back to profile photo, thumbnail, or general backup
+            let targetImage = socialShareUrl || rawPhoto || matchedChannel.photo_url || matchedChannel.photoUrl || matchedChannel.avatar;
 
             if (targetImage) {
               if (targetImage.includes("api.dicebear.com") && targetImage.includes("/svg")) {
                 targetImage = targetImage.replace("/svg", "/png");
               }
-              if (targetImage.startsWith("http")) {
+
+              if (targetImage.startsWith("http://") || targetImage.startsWith("https://")) {
                 image = targetImage;
               } else {
-                let cleanPhoto = targetImage;
-                if (cleanPhoto.startsWith("/api/files/") && !cleanPhoto.endsWith(".png") && !cleanPhoto.endsWith(".jpg") && !cleanPhoto.endsWith(".jpeg") && !cleanPhoto.endsWith(".webp") && !cleanPhoto.endsWith(".gif")) {
+                let cleanPhoto = targetImage.trim();
+                if (!cleanPhoto.startsWith("/")) {
+                  cleanPhoto = `/${cleanPhoto}`;
+                }
+                
+                if (cleanPhoto.startsWith("/api/files/") && !/\.(png|jpg|jpeg|gif|webp)$/i.test(cleanPhoto)) {
                   cleanPhoto = `${cleanPhoto}.jpg`;
                 }
-                image = `${protocol}://${host}${cleanPhoto.startsWith("/") ? "" : "/"}${cleanPhoto}`;
+
+                image = `https://${host}${cleanPhoto}`;
               }
             } else {
-              image = `${protocol}://${host}/og-image.jpg`;
+              image = `https://${host}/og-image.jpg`;
             }
           }
         }
@@ -1360,7 +1366,7 @@ async function startServer() {
           .replace(/'/g, "&#039;");
       };
 
-      // Strip any query parameters or hashes from the absolute image URL to prevent Facebook crawler errors
+      // Strip query parameters or hashes from image URL for crawler safety
       const cleanImage = image ? image.split("?")[0].split("#")[0] : "";
 
       const escapedTitle = escapeHtml(title);
