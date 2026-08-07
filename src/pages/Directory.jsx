@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot } from "firebase/firestore";
+import SEO from "@/components/SEO";
 import { Search, Radio, Eye, User, Calendar, Clock, Filter, X } from "lucide-react";
 
 const CATEGORIES = [
@@ -247,6 +248,11 @@ export default function Directory() {
 
   return (
     <div>
+      <SEO
+        title="Find DJs & Broadcaster Directory"
+        description="Search through our dynamic streamer frequency directory to find live underground DJ sets, radio broadcasts, jungle, drum & bass, tech, house, reggae, and acid signals on SPARKZ.TV."
+        image="/og-image.jpg"
+      />
       <div className="mx-auto max-w-[1440px] px-6 pt-8 pb-24 sm:pb-28 lg:pb-32" data-testid="streamer-directory-page">
       {/* Header Banner */}
       <div className="border border-[#27272a] bg-[#0a0a0a] p-8">

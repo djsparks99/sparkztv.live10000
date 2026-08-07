@@ -12,10 +12,10 @@ import SessionList from "@/components/SessionList";
 import ScheduleDisplay from "@/components/ScheduleDisplay";
 import LiveDuration from "@/components/LiveDuration";
 import UserLocationTime from "@/components/UserLocationTime";
+import SEO from "@/components/SEO";
 import { useAuth } from "@/lib/auth-context";
 import { Eye, ArrowLeft, User, Clock, QrCode } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
-import { useMetaTags } from "@/hooks/useMetaTags";
 import { QRCodeSVG } from "qrcode.react";
 
 export default function Channel() {
@@ -35,18 +35,12 @@ export default function Channel() {
     : "/og-image.jpg";
 
   const channelTitle = channel
-    ? `${channel.display_name || channel.username} (@${channel.username}) — Sparkz.TV`
-    : `Broadcaster ${username} — Sparkz.TV`;
+    ? `${channel.display_name || channel.username} (@${channel.username})`
+    : `Broadcaster ${username}`;
 
   const channelDesc = channel
     ? channel.stream_title || channel.bio || `Watch ${channel.display_name || channel.username} live on Sparkz.TV`
     : `Watch underground live streams on Sparkz.TV`;
-
-  useMetaTags({
-    title: channelTitle,
-    description: channelDesc,
-    image: channelImage,
-  });
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -183,6 +177,14 @@ export default function Channel() {
 
   return (
     <div className="mx-auto max-w-[1440px] px-6 pt-6 pb-24 sm:pb-28 lg:pb-32" data-testid={`channel-page-${username}`}>
+      <SEO
+        title={channelTitle}
+        description={channelDesc}
+        image={channelImage}
+        isLive={isLive}
+        category={channel?.category}
+        type="profile"
+      />
       <Link
         to="/"
         data-testid="back-to-browse"

@@ -7,9 +7,9 @@ import { collection, onSnapshot } from "firebase/firestore";
 import ChannelCard from "@/components/ChannelCard";
 import Marquee from "@/components/Marquee";
 import StreamCarousel from "@/components/StreamCarousel";
+import SEO from "@/components/SEO";
 import { ArrowRight, Radio, Zap, Heart } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
-import { useMetaTags } from "@/hooks/useMetaTags";
 import { useStableLiveChannels } from "@/hooks/useStableLiveChannels";
 
 const CATEGORIES = [
@@ -38,11 +38,6 @@ export default function Browse() {
   const isScreenLoading = (loading || backendLoading) && !hasLoadedOnceRef.current;
 
   useLivepeerAutoPoll();
-  useMetaTags({
-    title: "Sparkz.TV — Underground Live Streaming",
-    description: "Discover the finest underground music streams. Join the Signal.",
-    image: "/og-image.jpg",
-  });
 
   useEffect(() => {
     if (!user) {
@@ -270,6 +265,11 @@ export default function Browse() {
 
   return (
     <div className="min-h-screen">
+      <SEO
+        title="Underground Live Radio, DJ Sets & Broadcasters"
+        description="Discover the finest underground music streams, breakbeat jungle, drum & bass, tech house, dubstep, and roots reggae broadcasts on SPARKZ.TV. Join the Signal."
+        image="/og-image.jpg"
+      />
       {/* Dynamic Twitch-style stream carousel */}
       <StreamCarousel channels={stableChannels} allChannels={stableChannels} isLoading={isScreenLoading} />
 

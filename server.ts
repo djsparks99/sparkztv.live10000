@@ -1243,11 +1243,11 @@ async function startServer() {
   app.use(express.static(distPath, { index: false }));
   app.use(express.static(publicPath, { index: false }));
 
-  // Add this line to serve static files from a public or images folder
+  // Static directory links
   app.use(express.static('public')); 
-  // (or app.use('/images', express.static('images')); depending on your folder layout)
   app.use('/images', express.static(path.join(publicPath, 'images')));
 
+  // CATCH-ALL ROUTE FOR SPA & DYNAMIC OPEN GRAPH META INJECTION
   app.get("*", async (req, res, next) => {
     if (req.path.includes(".") && !req.path.endsWith(".html")) {
       return next();
