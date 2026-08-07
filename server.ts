@@ -1017,7 +1017,7 @@ async function startServer() {
   app.use("/api", api);
 
   // Dedicated explicit routes for social share images, serving raw binary buffers with forced correct Content-Type headers
-  app.get("/og-image.jpg", (req, res) => {
+  app.get("/og-image.jpg", (req: Request, res: Response) => {
     const paths = [
       path.join(process.cwd(), "public", "og-image.jpg"),
       path.join(process.cwd(), "dist", "og-image.jpg"),
@@ -1036,12 +1036,9 @@ async function startServer() {
 
     try {
       if (filePath) {
-        const buffer = fs.readFileSync(filePath);
         res.setHeader("Content-Type", "image/jpeg");
-        res.setHeader("Content-Length", buffer.length);
         res.setHeader("Cache-Control", "public, max-age=86400");
-        res.status(200);
-        return res.end(buffer);
+        return res.sendFile(filePath);
       }
     } catch (err: any) {
       console.error("[OG-Image] Error serving og-image.jpg:", err.message);
@@ -1049,7 +1046,7 @@ async function startServer() {
     return res.status(404).send("Not Found");
   });
 
-  app.get("/og-image.png", (req, res) => {
+  app.get("/og-image.png", (req: Request, res: Response) => {
     const paths = [
       path.join(process.cwd(), "public", "og-image.png"),
       path.join(process.cwd(), "dist", "og-image.png"),
@@ -1068,12 +1065,9 @@ async function startServer() {
 
     try {
       if (filePath) {
-        const buffer = fs.readFileSync(filePath);
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Content-Length", buffer.length);
         res.setHeader("Cache-Control", "public, max-age=86400");
-        res.status(200);
-        return res.end(buffer);
+        return res.sendFile(filePath);
       }
     } catch (err: any) {
       console.error("[OG-Image] Error serving og-image.png:", err.message);
@@ -1249,6 +1243,7 @@ async function startServer() {
 
   // CATCH-ALL ROUTE FOR SPA & DYNAMIC OPEN GRAPH META INJECTION
   app.get("*", async (req, res, next) => {
+    // Bypass SPA fallback for direct static asset requests (including image extensions)
     if (req.path.includes(".") && !req.path.endsWith(".html")) {
       return next();
     }
