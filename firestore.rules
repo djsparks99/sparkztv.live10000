@@ -77,5 +77,13 @@ service cloud.firestore {
       allow update: if request.auth != null && request.auth.token.email == "markysparks99@gmail.com";
       allow delete: if false;
     }
+
+    // Stories & Transmissions
+    match /stories/{storyId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if false;
+      allow delete: if request.auth != null && (request.auth.uid == resource.data.user_uid || request.auth.token.email == "markysparks99@gmail.com");
+    }
   }
 }

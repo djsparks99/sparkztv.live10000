@@ -66,9 +66,22 @@ export default function Channel() {
           }
         });
         if (!cancelled && data) {
+          let scheduleArray = [];
+          if (Array.isArray(data.schedules)) {
+            scheduleArray = data.schedules;
+          } else if (Array.isArray(data.schedule)) {
+            scheduleArray = data.schedule;
+          } else if (data.schedule_json) {
+            try {
+              scheduleArray = JSON.parse(data.schedule_json);
+            } catch (e) {}
+          } else if (data.schedule) {
+            scheduleArray = [data.schedule];
+          }
+
           setChannel((prev) => ({
             ...data,
-            schedule: (Array.isArray(data.schedule) && data.schedule.length > 0) ? data.schedule : (prev?.schedule || data.schedule || []),
+            schedule: scheduleArray.length > 0 ? scheduleArray : (prev?.schedule || []),
             photo_url: data.photo_url || prev?.photo_url || null,
           }));
         }

@@ -159,6 +159,27 @@
         "created_at": { "type": "string", "required": true },
         "processed_at": { "type": "string", "required": false }
       }
+    },
+    "stories": {
+      "path": "stories/{storyId}",
+      "description": "24-Hour Stories & Transmissions",
+      "allow": {
+        "read": "true",
+        "create": "request.auth != null",
+        "update": "false",
+        "delete": "request.auth != null && (request.auth.uid == resource.data.user_uid || request.auth.token.email == 'markysparks99@gmail.com')"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "user_uid": { "type": "string", "required": true },
+        "username": { "type": "string", "required": true },
+        "display_name": { "type": "string", "required": true },
+        "user_photo_url": { "type": "string", "required": false },
+        "media_type": { "type": "string", "required": true },
+        "media_url": { "type": "string", "required": true },
+        "caption": { "type": "string", "required": false },
+        "created_at": { "type": "string", "required": true }
+      }
     }
   }
 }

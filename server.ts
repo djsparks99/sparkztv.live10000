@@ -291,6 +291,56 @@ async function getFirestoreCollectionSafe(collectionName: string): Promise<any[]
   return [];
 }
 
+// REST-based Document Delete Fallback Helper
+async function deleteFirestoreDocRest(collectionName: string, docId: string, authToken?: string): Promise<boolean> {
+  if (!firebaseConfig) return false;
+  const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+  const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/${collectionName}/${docId}?key=${firebaseConfig.apiKey}`;
+  
+  try {
+    let token = authToken;
+    if (!token) {
+      token = await getMetadataToken();
+    }
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
+    }
+
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn(`[Firestore REST] Delete failed for ${collectionName}/${docId}:`, text);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.warn(`[Firestore REST] Delete exception for ${collectionName}/${docId}:`, sanitizeErrorMsg(err.message));
+    return false;
+  }
+}
+
+// Unified Delete Document Helper
+async function deleteFirestoreDocSafe(collectionName: string, docId: string, authToken?: string): Promise<boolean> {
+  if (!dbFirestore) {
+    return deleteFirestoreDocRest(collectionName, docId, authToken);
+  }
+  try {
+    await dbFirestore.collection(collectionName).doc(docId).delete();
+    return true;
+  } catch (err: any) {
+    if (err.message.includes("default credentials") || err.message.includes("credential") || err.message.includes("PERMISSION_DENIED") || err.message.includes("permissions") || err.message.includes("access")) {
+      return deleteFirestoreDocRest(collectionName, docId, authToken);
+    }
+    console.warn(`[Firestore Safe] Delete failed:`, sanitizeErrorMsg(err.message));
+  }
+  return false;
+}
+
 async function updateFirestoreChannelLiveStatus(isLive: boolean) {
   try {
     const nowIso = new Date().toISOString();
@@ -431,34 +481,34 @@ function saveBase64ToUploads(base64Str: string | null | undefined): string | nul
     return base64Str || null;
   }
 
-  // Check if it is a base64 data URI
-  if (!base64Str.startsWith("data:image/")) {
+  // Check if it is a base64 data URI (image or video)
+  if (!base64Str.startsWith("data:image/") && !base64Str.startsWith("data:video/")) {
     return base64Str;
   }
 
   try {
-    const matches = base64Str.match(/^data:image\/([A-Za-z0-9+]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
+    const matches = base64Str.match(/^data:(image|video)\/([A-Za-z0-9+]+);base64,(.+)$/);
+    if (!matches || matches.length !== 4) {
       return base64Str;
     }
 
-    let ext = matches[1].toLowerCase();
+    let ext = matches[2].toLowerCase();
     // Normalize extensions
     if (ext === "jpeg" || ext === "jpg+xml") ext = "jpg";
     if (ext === "svg+xml") ext = "svg";
     
-    const dataBuffer = Buffer.from(matches[2], "base64");
+    const dataBuffer = Buffer.from(matches[3], "base64");
     
     // Generate a unique file name
     const filename = `${crypto.randomUUID()}.${ext}`;
     const filePath = path.join(uploadsDir, filename);
     
     fs.writeFileSync(filePath, dataBuffer);
-    console.log(`[Base64 Upload] Successfully saved base64 image to disk: ${filePath} (${dataBuffer.length} bytes)`);
+    console.log(`[Base64 Upload] Successfully saved base64 ${matches[1]} to disk: ${filePath} (${dataBuffer.length} bytes)`);
     
     return `/api/files/${filename}`;
   } catch (err: any) {
-    console.error("[Base64 Upload] Failed to parse or save base64 image to disk:", err.message);
+    console.error("[Base64 Upload] Failed to parse or save base64 to disk:", err.message);
     return base64Str;
   }
 }
@@ -543,6 +593,32 @@ const localPayoutsStore: any[] = [];
 
 const activeViewersPerRoom = new Map<string, Set<string>>();
 const viewCache = new Map<string, number>();
+
+const storiesStore = new Map<string, any>();
+
+async function syncStoriesFromFirestore() {
+  try {
+    const docs = await getFirestoreCollectionSafe("stories");
+    const now = Date.now();
+    const oneDay = 24 * 3600 * 1000;
+    
+    storiesStore.clear();
+    for (const doc of docs) {
+      const data = doc.data();
+      if (!data) continue;
+      const createdAt = new Date(data.created_at || doc.id).getTime();
+      if (now - createdAt < oneDay) {
+        storiesStore.set(doc.id, {
+          id: doc.id,
+          ...data,
+        });
+      }
+    }
+    console.log(`[Stories Sync] Synced ${storiesStore.size} active stories from Firestore.`);
+  } catch (err: any) {
+    console.warn("[Stories Sync] Error syncing stories from Firestore:", err.message);
+  }
+}
 
 const DUMMY_USERNAMES = [
   "pirate_fm", "acid_vault", "dub_station", "test", "demo", "undefined", "null", "dummy", "user", "channel"
@@ -718,6 +794,9 @@ async function startServer() {
   db.channels.clear();
   getMasterChannel().catch((err) => {
     console.warn("Failed to pre-warm master channel in background:", err.message);
+  });
+  syncStoriesFromFirestore().catch((err) => {
+    console.warn("Failed to pre-warm stories from Firestore:", err.message);
   });
 
   app.get("/api/channels/mine", async (req, res) => {
@@ -965,6 +1044,141 @@ async function startServer() {
     return res.json([
       "music", "talk", "gaming", "art", "outdoors", "lounge", "dj_mix", "podcast", "radio", "vibes"
     ]);
+  });
+
+  api.get("/stories", async (req, res) => {
+    try {
+      const now = Date.now();
+      const oneDay = 24 * 3600 * 1000;
+      
+      // Sync if empty to handle startup/restart scenarios
+      if (storiesStore.size === 0) {
+        await syncStoriesFromFirestore();
+      }
+
+      const activeStories: any[] = [];
+      for (const [id, story] of storiesStore.entries()) {
+        const createdAt = new Date(story.created_at).getTime();
+        const elapsedSec = (now - createdAt) / 1000;
+        const timeLeftSec = (24 * 3600) - elapsedSec;
+        
+        if (timeLeftSec > 0) {
+          activeStories.push({
+            ...story,
+            time_left_sec: Math.floor(timeLeftSec),
+          });
+        } else {
+          // Expired, delete from local map and from Firestore
+          storiesStore.delete(id);
+          deleteFirestoreDocSafe("stories", id).catch(() => {});
+        }
+      }
+
+      // Sort newest first
+      activeStories.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return res.json(activeStories);
+    } catch (err: any) {
+      console.error("[Stories API] Error listing stories:", err);
+      return res.status(500).json({ error: "Failed to load stories" });
+    }
+  });
+
+  api.post("/stories", authMiddleware, async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const { media, file, caption, media_type, filename } = req.body;
+      const mediaPayload = media || file;
+      
+      if (!mediaPayload) {
+        return res.status(400).json({ error: "Media payload is required" });
+      }
+
+      // Save to local disk
+      const fileUrlPath = saveBase64ToUploads(mediaPayload);
+      if (!fileUrlPath) {
+        return res.status(500).json({ error: "Failed to save story media file" });
+      }
+
+      const storyId = crypto.randomUUID();
+      const nowIso = new Date().toISOString();
+
+      const newStory = {
+        id: storyId,
+        user_uid: user.uid,
+        username: user.username || "anonymous",
+        display_name: user.display_name || user.username || "Anonymous",
+        user_photo_url: user.photo_url || null,
+        media_type: media_type || "image",
+        media_url: fileUrlPath,
+        caption: caption || "",
+        created_at: nowIso,
+      };
+
+      // Store in memory
+      storiesStore.set(storyId, newStory);
+
+      // Store in Firestore
+      await setFirestoreDocSafe("stories", storyId, newStory, false, req.authToken);
+
+      return res.status(201).json({
+        success: true,
+        story: {
+          ...newStory,
+          time_left_sec: 24 * 3600,
+        }
+      });
+    } catch (err: any) {
+      console.error("[Stories API] Error publishing story:", err);
+      return res.status(500).json({ error: "Failed to publish story" });
+    }
+  });
+
+  api.delete("/stories/:id", authMiddleware, async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const storyId = req.params.id;
+      const story = storiesStore.get(storyId);
+
+      // If not in cache, try checking Firestore directly (just in case)
+      let finalStory = story;
+      if (!finalStory) {
+        const doc = await getFirestoreDocSafe("stories", storyId);
+        if (doc && doc.exists) {
+          finalStory = doc.data();
+        }
+      }
+
+      if (!finalStory) {
+        return res.status(404).json({ error: "Story not found" });
+      }
+
+      // Check permissions: must be owner OR markysparks99@gmail.com
+      const isOwner = finalStory.user_uid === user.uid;
+      const isAdmin = user.email === "markysparks99@gmail.com";
+
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ error: "You are not authorized to delete this story" });
+      }
+
+      // Delete from local cache
+      storiesStore.delete(storyId);
+
+      // Delete from Firestore
+      await deleteFirestoreDocSafe("stories", storyId, req.authToken);
+
+      return res.json({ success: true, message: "Story deleted successfully" });
+    } catch (err: any) {
+      console.error("[Stories API] Error deleting story:", err);
+      return res.status(500).json({ error: "Failed to delete story" });
+    }
   });
 
   const handleUserUpdate = async (req: any, res: Response) => {
