@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import multer from "multer";
+import Stripe from "stripe";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
@@ -60,6 +61,21 @@ try {
 function sanitizeErrorMsg(msg: string): string {
   if (!msg) return "";
   return msg.replace(/PERMISSION_DENIED/gi, "ACCESS_PENDING").replace(/permission/gi, "access");
+}
+
+let stripeClient: Stripe | null = null;
+function getStripe(): Stripe | null {
+  if (!stripeClient) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (key) {
+      try {
+        stripeClient = new Stripe(key);
+      } catch (err) {
+        console.error("[Stripe] Failed to initialize Stripe client:", err);
+      }
+    }
+  }
+  return stripeClient;
 }
 
 // REST-based Document Get Fallback Helper
@@ -1255,6 +1271,330 @@ async function startServer() {
     return res.json({
       success: true,
       vinyl_bits: user.vinyl_bits
+    });
+  });
+
+  api.post("/stripe/create-checkout-session", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    const { amount } = req.body;
+    const amt = parseInt(amount, 10);
+    if (isNaN(amt) || amt <= 0) {
+      return res.status(400).json({ error: "Invalid purchase amount" });
+    }
+
+    const stripe = getStripe();
+    if (stripe) {
+      try {
+        const origin = req.headers.origin || "https://sparkztv.live";
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: `${amt.toLocaleString()} Vinyl Bits`,
+                  description: "Support underground electronic music streamers on SPARKZ.TV",
+                },
+                unit_amount: amt, // 1 Bit = $0.01 USD. E.g. 1000 bits = 1000 cents = $10.00
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${origin}/payouts?session_id={CHECKOUT_SESSION_ID}&purchase_success=true&amount=${amt}`,
+          cancel_url: `${origin}/payouts?purchase_canceled=true`,
+          metadata: {
+            userId: user.uid,
+            amountBits: amt.toString(),
+          },
+        });
+        return res.json({ success: true, url: session.url, real: true });
+      } catch (err: any) {
+        console.error("[Stripe] Failed to create real checkout session:", err);
+        return res.status(500).json({ error: "Stripe Checkout error: " + err.message });
+      }
+    } else {
+      // Graceful fallback simulation
+      const simulatedSessionId = `cs_test_${Math.random().toString(36).substring(2, 15)}`;
+      const simulatedUrl = `/payouts?session_id=${simulatedSessionId}&purchase_success=true&amount=${amt}&simulated_checkout=true`;
+      console.log("[Stripe Backend] No STRIPE_SECRET_KEY found. Falling back to simulated Checkout Session.");
+      return res.json({ success: true, url: simulatedUrl, real: false, sessionId: simulatedSessionId });
+    }
+  });
+
+  api.post("/stripe/verify-session", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    const { sessionId, amount } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ error: "Session ID is required" });
+    }
+    
+    const amt = parseInt(amount, 10);
+    if (isNaN(amt) || amt <= 0) {
+      return res.status(400).json({ error: "Invalid amount specified for verification" });
+    }
+
+    const stripe = getStripe();
+    if (stripe) {
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (session.payment_status === "paid" || session.payment_status === "no_payment_required") {
+          const bitsAwarded = parseInt(session.metadata?.amountBits || "0", 10) || amt;
+          
+          user.vinyl_bits = (user.vinyl_bits || 0) + bitsAwarded;
+          db.users.set(user.uid, user);
+          
+          await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
+          
+          return res.json({
+            success: true,
+            vinyl_bits: user.vinyl_bits,
+            message: `Successfully verified real Stripe transaction of $${(bitsAwarded / 100).toFixed(2)}!`
+          });
+        } else {
+          return res.status(400).json({ error: "Payment was not completed successfully according to Stripe." });
+        }
+      } catch (err: any) {
+        console.error("[Stripe verification] Error verifying session:", err);
+        return res.status(500).json({ error: "Stripe verification error: " + err.message });
+      }
+    } else {
+      // Simulated successful verification for development environment
+      if (sessionId.startsWith("cs_test_") || sessionId.startsWith("sim_")) {
+        user.vinyl_bits = (user.vinyl_bits || 0) + amt;
+        db.users.set(user.uid, user);
+        
+        await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
+        
+        return res.json({
+          success: true,
+          vinyl_bits: user.vinyl_bits,
+          message: `[Simulated] Transaction approved! Credited ${amt} Vinyl Bits to @${user.username || 'user'}.`
+        });
+      }
+      return res.status(400).json({ error: "Invalid checkout session format for simulation." });
+    }
+  });
+
+  api.post("/stripe/connect/onboard", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const stripe = getStripe();
+    const origin = req.headers.origin || "https://sparkztv.live";
+
+    if (stripe) {
+      try {
+        let accountId = user.stripe_connect_id;
+
+        if (!accountId) {
+          const account = await stripe.accounts.create({
+            type: "express",
+            email: user.email,
+            capabilities: {
+              card_payments: { requested: true },
+              transfers: { requested: true },
+            },
+            business_profile: {
+              name: `@${user.username} on SPARKZ.TV`,
+              url: `https://sparkztv.live/channels/${user.username}`,
+            },
+            metadata: {
+              userId: user.uid,
+              username: user.username,
+            },
+          });
+          accountId = account.id;
+          user.stripe_connect_id = accountId;
+          user.stripe_connect_status = "pending_onboarding";
+          db.users.set(user.uid, user);
+          await setFirestoreDocSafe("users", user.uid, {
+            stripe_connect_id: accountId,
+            stripe_connect_status: "pending_onboarding",
+          }, true);
+        }
+
+        const accountLink = await stripe.accountLinks.create({
+          account: accountId,
+          refresh_url: `${origin}/payouts?connect_refresh=true`,
+          return_url: `${origin}/payouts?connect_success=true&account_id=${accountId}`,
+          type: "account_onboarding",
+        });
+
+        return res.json({ success: true, url: accountLink.url, real: true, accountId });
+      } catch (err: any) {
+        console.error("[Stripe Connect] Failed to onboard:", err);
+        return res.status(500).json({ error: "Stripe Connect onboarding error: " + err.message });
+      }
+    } else {
+      // Graceful fallback for Simulated Stripe Connect Onboarding
+      const simAccountId = user.stripe_connect_id || `acct_sim_${user.uid.substring(0, 10)}`;
+      user.stripe_connect_id = simAccountId;
+      user.stripe_connect_status = "pending_onboarding";
+      db.users.set(user.uid, user);
+      await setFirestoreDocSafe("users", user.uid, {
+        stripe_connect_id: simAccountId,
+        stripe_connect_status: "pending_onboarding",
+      }, true);
+
+      const simulatedUrl = `${origin}/payouts?connect_success=true&account_id=${simAccountId}&simulated_connect=true`;
+      console.log("[Stripe Connect Backend] No STRIPE_SECRET_KEY found. Falling back to simulated onboarding URL.");
+      return res.json({ success: true, url: simulatedUrl, real: false, accountId: simAccountId });
+    }
+  });
+
+  api.get("/stripe/connect/status", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!user.stripe_connect_id) {
+      return res.json({ linked: false, status: "none" });
+    }
+
+    const stripe = getStripe();
+    if (stripe) {
+      try {
+        const account = await stripe.accounts.retrieve(user.stripe_connect_id);
+        const active = account.details_submitted && account.payouts_enabled;
+        const status = active ? "active" : "pending_onboarding";
+        
+        user.stripe_connect_status = status;
+        if (active) {
+          user.payout_method = "stripe_connect";
+          user.payout_details = user.stripe_connect_id;
+        }
+        db.users.set(user.uid, user);
+        await setFirestoreDocSafe("users", user.uid, {
+          stripe_connect_status: status,
+          payout_method: user.payout_method,
+          payout_details: user.payout_details,
+        }, true);
+
+        return res.json({
+          linked: true,
+          status,
+          accountId: user.stripe_connect_id,
+          detailsSubmitted: account.details_submitted,
+          payoutsEnabled: account.payouts_enabled,
+          real: true,
+        });
+      } catch (err: any) {
+        console.error("[Stripe Connect] Failed to retrieve account status:", err);
+        return res.status(500).json({ error: "Stripe retrieval error: " + err.message });
+      }
+    } else {
+      const status = user.stripe_connect_status || "pending_onboarding";
+      return res.json({
+        linked: true,
+        status,
+        accountId: user.stripe_connect_id,
+        detailsSubmitted: status === "active",
+        payoutsEnabled: status === "active",
+        real: false,
+      });
+    }
+  });
+
+  api.post("/stripe/connect/verify-onboarding", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { accountId, isSimulated } = req.body;
+    if (!accountId) {
+      return res.status(400).json({ error: "Account ID is required" });
+    }
+
+    const stripe = getStripe();
+    if (stripe && !isSimulated) {
+      try {
+        const account = await stripe.accounts.retrieve(accountId);
+        if (account.details_submitted) {
+          user.stripe_connect_id = accountId;
+          user.stripe_connect_status = "active";
+          user.payout_method = "stripe_connect";
+          user.payout_details = accountId;
+          db.users.set(user.uid, user);
+
+          await setFirestoreDocSafe("users", user.uid, {
+            stripe_connect_id: accountId,
+            stripe_connect_status: "active",
+            payout_method: "stripe_connect",
+            payout_details: accountId,
+          }, true);
+
+          return res.json({
+            success: true,
+            status: "active",
+            message: "Stripe Connect successfully verified and linked!",
+          });
+        } else {
+          return res.status(400).json({ error: "Stripe onboarding not fully completed yet." });
+        }
+      } catch (err: any) {
+        console.error("[Stripe Connect verification] Error retrieving account:", err);
+        return res.status(500).json({ error: "Stripe Connect verification error: " + err.message });
+      }
+    } else {
+      user.stripe_connect_id = accountId;
+      user.stripe_connect_status = "active";
+      user.payout_method = "stripe_connect";
+      user.payout_details = accountId;
+      db.users.set(user.uid, user);
+
+      await setFirestoreDocSafe("users", user.uid, {
+        stripe_connect_id: accountId,
+        stripe_connect_status: "active",
+        payout_method: "stripe_connect",
+        payout_details: accountId,
+      }, true);
+
+      return res.json({
+        success: true,
+        status: "active",
+        message: "[Simulated] Stripe Connect account linked successfully with test bank detail!",
+      });
+    }
+  });
+
+  api.post("/stripe/connect/disconnect", authMiddleware, async (req: any, res) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    user.stripe_connect_id = null;
+    user.stripe_connect_status = null;
+    if (user.payout_method === "stripe_connect") {
+      user.payout_method = null;
+      user.payout_details = null;
+    }
+    db.users.set(user.uid, user);
+
+    await setFirestoreDocSafe("users", user.uid, {
+      stripe_connect_id: null,
+      stripe_connect_status: null,
+      payout_method: user.payout_method,
+      payout_details: user.payout_details,
+    }, true);
+
+    return res.json({
+      success: true,
+      message: "Stripe Connect disconnected successfully.",
     });
   });
 

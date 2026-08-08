@@ -14,7 +14,7 @@ import LiveDuration from "@/components/LiveDuration";
 import UserLocationTime from "@/components/UserLocationTime";
 import SEO from "@/components/SEO";
 import { useAuth } from "@/lib/auth-context";
-import { Eye, ArrowLeft, User, Clock, QrCode } from "lucide-react";
+import { Eye, ArrowLeft, User, Clock, QrCode, Coins } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -261,6 +261,15 @@ export default function Channel() {
                     }))
                   }
                 />
+                <Link
+                  to="/payouts?buy=true"
+                  data-testid="channel-buy-bits-btn"
+                  className="flex items-center gap-1.5 border border-[#e5ff00]/60 bg-[#e5ff00]/10 px-3 py-2 font-mono text-xs font-bold uppercase tracking-wider text-[#e5ff00] hover:border-[#e5ff00] hover:bg-[#e5ff00]/25 transition-all"
+                  title="Purchase Vinyl Bits to Support DJ"
+                >
+                  <Coins className="h-4 w-4 text-[#e5ff00] animate-pulse" />
+                  <span>BUY BITS</span>
+                </Link>
               </div>
             </div>
           </div>

@@ -135,6 +135,16 @@ export default function Navbar() {
         </form>
 
         <div className="flex items-center gap-3">
+          <Link
+            to="/payouts?buy=true"
+            data-testid="nav-buy-bits-btn"
+            className="flex items-center gap-1.5 border border-[#e5ff00]/60 bg-[#e5ff00]/10 px-2.5 py-1.5 font-mono text-[11px] uppercase font-bold tracking-wider text-[#e5ff00] hover:border-[#e5ff00] hover:bg-[#e5ff00]/25 transition-all"
+            title="Buy Vinyl Bits to Support Streamers"
+          >
+            <Coins className="h-3.5 w-3.5 text-[#e5ff00] animate-pulse" />
+            <span className="hidden sm:inline">BUY BITS</span>
+          </Link>
+
           <button
             type="button"
             onClick={toggleTheme}

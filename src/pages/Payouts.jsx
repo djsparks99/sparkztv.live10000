@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, apiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
+import PayoutsSettings from "@/components/PayoutsSettings";
 import { 
   Coins, 
   DollarSign, 
@@ -71,7 +72,46 @@ export default function Payouts() {
   };
 
   useEffect(() => {
-    fetchData();
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    const success = params.get("purchase_success");
+    const amount = params.get("amount");
+    const autoBuy = params.get("buy") === "true";
+
+    if (autoBuy) {
+      setShowPurchaseModal(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("buy");
+      window.history.replaceState({}, document.title, url.toString());
+    }
+
+    if (sessionId && success && amount) {
+      const verifyStripePayment = async () => {
+        try {
+          toast.loading("Verifying transaction with Stripe network...", { id: "stripe-verify" });
+          const { data } = await api.post("/stripe/verify-session", {
+            sessionId: sessionId,
+            amount: parseInt(amount, 10)
+          });
+          toast.success(data.message || "Vinyl Bits added successfully!", { id: "stripe-verify" });
+          
+          // Clear query params from browser URL so page refreshing doesn't replay
+          const url = new URL(window.location.href);
+          url.searchParams.delete("session_id");
+          url.searchParams.delete("purchase_success");
+          url.searchParams.delete("amount");
+          url.searchParams.delete("simulated_checkout");
+          window.history.replaceState({}, document.title, url.toString());
+          
+          fetchData();
+        } catch (err) {
+          toast.error("Stripe verification failed. Please contact support.", { id: "stripe-verify" });
+        }
+      };
+      verifyStripePayment();
+    } else {
+      fetchData();
+    }
     fetchHistory();
   }, [user]);
 
@@ -102,23 +142,28 @@ export default function Payouts() {
     }
   };
 
-  // Buy Bits
+  // Buy Bits via Stripe Checkout Session
   const handlePurchaseBits = async () => {
     setPurchasing(true);
     try {
-      const { data } = await api.post("/users/me/vinyl-bits/purchase", {
+      toast.loading("Initiating Stripe Checkout secure session...", { id: "stripe-checkout" });
+      const { data } = await api.post("/stripe/create-checkout-session", {
         amount: purchaseAmount
       });
-      setBalances(prev => ({
-        ...prev,
-        vinyl_bits: data.vinyl_bits
-      }));
-      toast.success(`Purchased ${purchaseAmount} Vinyl Bits! 💿`);
-      setShowPurchaseModal(false);
+      
+      if (data.success && data.url) {
+        toast.success("Checkout session created! Redirecting to secure portal...", { id: "stripe-checkout" });
+        setTimeout(() => {
+          window.location.href = data.url;
+        }, 1000);
+      } else {
+        toast.error("Failed to create checkout session.", { id: "stripe-checkout" });
+      }
     } catch (err) {
-      toast.error(apiErrorMessage(err) || "Failed to complete Vinyl Bits purchase.");
+      toast.error(apiErrorMessage(err) || "Failed to initiate purchase session.", { id: "stripe-checkout" });
     } finally {
       setPurchasing(false);
+      setShowPurchaseModal(false);
     }
   };
 
@@ -205,63 +250,17 @@ export default function Payouts() {
               </p>
             </div>
 
-            {/* 2. PAYOUT METHOD SETUP */}
-            <div className="border border-zinc-800 bg-[#050505] p-5">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-1">// METHOD MANAGEMENT</div>
-              <h2 className="text-xs uppercase font-black text-white tracking-widest mb-4">PAYOUT PREFERENCES</h2>
-              
-              <form onSubmit={handleSaveConfig} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-zinc-400 mb-2">SELECT PROVIDER</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPayoutMethod("paypal")}
-                      className={`py-2 px-3 border font-bold text-xs uppercase transition-all flex items-center justify-center gap-2 ${
-                        payoutMethod === "paypal" 
-                          ? "border-[#e5ff00] bg-[#e5ff00]/10 text-[#e5ff00]" 
-                          : "border-zinc-800 bg-black text-zinc-400 hover:border-zinc-700"
-                      }`}
-                    >
-                      <span>PAYPAL</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPayoutMethod("stripe")}
-                      className={`py-2 px-3 border font-bold text-xs uppercase transition-all flex items-center justify-center gap-2 ${
-                        payoutMethod === "stripe" 
-                          ? "border-[#e5ff00] bg-[#e5ff00]/10 text-[#e5ff00]" 
-                          : "border-zinc-800 bg-black text-zinc-400 hover:border-zinc-700"
-                      }`}
-                    >
-                      <span>STRIPE CARD</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-zinc-400 mb-1">
-                    {payoutMethod === "paypal" ? "PAYPAL EMAIL ADDRESS" : "STRIPE ACCOUNT ID"}
-                  </label>
-                  <input
-                    type={payoutMethod === "paypal" ? "email" : "text"}
-                    className="input-terminal w-full py-2 px-3 text-xs"
-                    value={payoutDetails}
-                    onChange={(e) => setPayoutDetails(e.target.value)}
-                    placeholder={payoutMethod === "paypal" ? "dj@example.com" : "acct_1..."}
-                    required
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingConfig}
-                  className="w-full btn-primary text-xs py-2 uppercase font-black tracking-widest"
-                >
-                  {savingConfig ? "SAVING CONFIG..." : "SAVE & LOCK CONFIG"}
-                </button>
-              </form>
-            </div>
+            {/* 2. PAYOUT METHOD SETUP (STRIPE CONNECT INTEGRATION) */}
+            <PayoutsSettings onStatusChange={(status, id) => {
+              setBalances(prev => ({
+                ...prev,
+                payout_method: status === "active" ? "stripe_connect" : null,
+                payout_details: id || ""
+              }));
+              setPayoutMethod(status === "active" ? "stripe" : "paypal");
+              setPayoutDetails(id || "");
+              fetchHistory();
+            }} />
 
             {/* 3. WALLET DETAILS / SANDBOX PURCHASER */}
             <div className="border border-zinc-800 bg-[#050505] p-5">
@@ -424,7 +423,7 @@ export default function Payouts() {
         </div>
       )}
 
-      {/* MOCK VINYL BITS PURCHASE MODAL */}
+      {/* REAL VINYL BITS PURCHASE MODAL */}
       {showPurchaseModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div 
@@ -434,7 +433,7 @@ export default function Payouts() {
             <div className="border-b border-zinc-900 pb-3 mb-4">
               <h3 className="font-display text-sm font-black uppercase tracking-widest text-[#e5ff00] flex items-center gap-1.5">
                 <Coins className="h-5 w-5 fill-[#e5ff00]" />
-                <span>PURCHASE VINYL BITS (SANDBOX)</span>
+                <span>PURCHASE VINYL BITS (STRIPE)</span>
               </h3>
               <p className="text-[10px] text-zinc-400 uppercase mt-1">Select bits density bundle. 100% funds directed directly to the streamers you support.</p>
             </div>
@@ -464,12 +463,12 @@ export default function Payouts() {
               ))}
             </div>
 
-            {/* MOCK CREDIT CARD BLOCK */}
+            {/* SECURE STRIPE GATEWAY BLOCK */}
             <div className="border border-zinc-900 bg-black/80 p-3 mb-6 space-y-2">
-              <div className="text-[9px] text-zinc-500 uppercase tracking-widest">// SANDBOX PAYMENT FORM</div>
+              <div className="text-[9px] text-zinc-500 uppercase tracking-widest">// SECURE STRIPE PORTAL</div>
               <div className="flex items-center gap-2 text-xs text-zinc-400 border border-zinc-800 p-2 bg-zinc-950">
-                <CreditCard className="h-4 w-4 text-zinc-500" />
-                <span className="font-mono text-zinc-500">••••  ••••  ••••  4242</span>
+                <CreditCard className="h-4 w-4 text-[#e5ff00]" />
+                <span className="font-mono text-zinc-400">Cards, Apple Pay, Google Pay, Local Options</span>
               </div>
             </div>
 
@@ -489,7 +488,7 @@ export default function Payouts() {
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <span>CONFIRM PAY</span>
+                    <span>CHECKOUT</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </>
                 )}
