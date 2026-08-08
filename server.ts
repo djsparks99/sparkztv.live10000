@@ -1779,6 +1779,7 @@ async function startServer() {
   async function runEndOfMonthPayouts(authToken?: string) {
     console.log("[Payout Scheduler] Running automated payout processing...");
     const now = new Date();
+    const stripe = getStripe();
     
     for (const user of db.users.values()) {
       const balance = user.accumulated_bits_balance || 0;
@@ -1788,7 +1789,7 @@ async function startServer() {
         const amountUsd = balance * 0.01;
         
         const payoutId = "pay-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
-        const payoutRecord = {
+        const payoutRecord: any = {
           id: payoutId,
           streamer_uid: user.uid,
           streamer_username: user.username,
@@ -1801,24 +1802,70 @@ async function startServer() {
           processed_at: now.toISOString(),
         };
         
-        user.accumulated_bits_balance = 0;
-        db.users.set(user.uid, user);
-        
+        let payoutStatus = "processing";
+        let stripeTransferId = null;
+        let stripeError = null;
+
+        if (payoutMethod === "stripe_connect" && user.stripe_connect_id) {
+          if (stripe) {
+            try {
+              console.log(`[Payout Scheduler] Discharging real Stripe Connect transfer to ${user.stripe_connect_id} for $${amountUsd.toFixed(2)}`);
+              const transfer = await stripe.transfers.create({
+                amount: Math.round(amountUsd * 100), // cents
+                currency: "usd",
+                destination: user.stripe_connect_id,
+                description: `Monthly SPARKZ.TV Streamer Payout for @${user.username}`,
+                metadata: {
+                  streamerUid: user.uid,
+                  amountBits: balance.toString(),
+                }
+              });
+              stripeTransferId = transfer.id;
+              payoutStatus = "paid";
+              console.log(`[Payout Scheduler] Stripe Connect transfer succeeded: ${transfer.id}`);
+            } catch (err: any) {
+              payoutStatus = "failed";
+              stripeError = err.message;
+              console.error(`[Payout Scheduler] Stripe Connect transfer failed for ${user.username}:`, err);
+            }
+          } else {
+            console.log(`[Payout Scheduler] Simulated Stripe Connect transfer to ${user.stripe_connect_id} for $${amountUsd.toFixed(2)} (Sandbox Mode)`);
+          }
+        }
+
+        if (payoutStatus !== "failed") {
+          user.accumulated_bits_balance = 0;
+          db.users.set(user.uid, user);
+        }
+
+        payoutRecord.status = payoutStatus;
+        if (stripeTransferId) {
+          payoutRecord.stripe_transfer_id = stripeTransferId;
+        }
+        if (stripeError) {
+          payoutRecord.stripe_error = stripeError;
+        }
+
         localPayoutsStore.push(payoutRecord);
         
         try {
           await setFirestoreDocSafe("payouts", payoutId, payoutRecord, false, authToken);
-          await setFirestoreDocSafe("users", user.uid, { accumulated_bits_balance: 0 }, true, authToken);
+          if (payoutStatus !== "failed") {
+            await setFirestoreDocSafe("users", user.uid, { accumulated_bits_balance: 0 }, true, authToken);
+          }
           
-          setTimeout(async () => {
-            payoutRecord.status = "paid";
-            payoutRecord.processed_at = new Date().toISOString();
-            await setFirestoreDocSafe("payouts", payoutId, {
-              status: "paid",
-              processed_at: payoutRecord.processed_at
-            }, true, authToken);
-            console.log(`[Payout Scheduler] Payout ${payoutId} for streamer ${user.username} processed successfully.`);
-          }, 5000);
+          if (payoutStatus === "processing") {
+            // Simulated delay for non-Stripe methods or simulated sandbox
+            setTimeout(async () => {
+              payoutRecord.status = "paid";
+              payoutRecord.processed_at = new Date().toISOString();
+              await setFirestoreDocSafe("payouts", payoutId, {
+                status: "paid",
+                processed_at: payoutRecord.processed_at
+              }, true, authToken);
+              console.log(`[Payout Scheduler] Simulated payout ${payoutId} for streamer ${user.username} processed successfully.`);
+            }, 5000);
+          }
         } catch (err: any) {
           console.error(`[Payout Scheduler] Firestore failed for user ${user.uid}:`, sanitizeErrorMsg(err.message));
         }
