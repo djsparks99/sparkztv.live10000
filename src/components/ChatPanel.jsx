@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { getToken, setToken, fileUrl, BACKEND, api, getAbsoluteOrigin } from "@/lib/api";
+import { getToken, setToken, fileUrl, BACKEND, api, getAbsoluteOrigin, apiErrorMessage } from "@/lib/api";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame, Calendar, Users } from "lucide-react";
+import { Send, LogIn, User, Smile, Zap, Crown, Shield, Gem, Sparkles, X, Flame, Calendar, Users, Disc, Coins } from "lucide-react";
 import { Link } from "react-router-dom";
 import FloatingReactions from "./FloatingReactions";
+import { toast } from "sonner";
 
 const REACTIONS = [
   { char: "💿", label: "BANGER", color: "hover:border-cyan-500 hover:bg-cyan-500/10 text-cyan-400" },
@@ -40,6 +41,7 @@ export default function ChatPanel({ username }) {
   
   // Watts state
   const [watts, setWatts] = useState(250);
+  const [userVinylBits, setUserVinylBits] = useState(0);
   const [accruedNotice, setAccruedNotice] = useState(null);
   const [isHighlight, setIsHighlight] = useState(false);
 
@@ -111,6 +113,15 @@ export default function ChatPanel({ username }) {
           }
         })
         .catch(() => {});
+
+      api
+        .get("/users/me/vinyl-bits")
+        .then(({ data }) => {
+          if (!cancelled && typeof data?.vinyl_bits === "number") {
+            setUserVinylBits(data.vinyl_bits);
+          }
+        })
+        .catch(() => {});
     }
 
     return () => {
@@ -126,6 +137,20 @@ export default function ChatPanel({ username }) {
       localStorage.setItem("sparkz_guest_name", clean);
     }
     setIsEditingGuestName(false);
+  };
+
+  const handleDropVinylBits = async (amount) => {
+    if (!user) {
+      toast.error("Please log in to support the streamer with Vinyl Bits!");
+      return;
+    }
+    try {
+      const { data } = await api.post(`/channels/${username}/vinyl-bits/drop`, { amount });
+      setUserVinylBits(data.vinyl_bits);
+      toast.success(`Dropped ${amount} Vinyl Bits! 💿✨`);
+    } catch (err) {
+      toast.error(apiErrorMessage(err) || "Failed to drop Vinyl Bits.");
+    }
   };
 
   useEffect(() => {
@@ -831,6 +856,30 @@ function ChatMessage({ m, emotes, onInspectUser }) {
       return part;
     });
   };
+
+  if (m.highlight_type === "vinyl_bits_drop") {
+    return (
+      <div className="relative overflow-hidden p-3.5 my-3 border border-dashed animate-flash-yellow rounded-sm font-mono text-xs">
+        <div className="absolute top-0 right-0 p-3 opacity-15 pointer-events-none">
+          <Disc className="h-10 w-10 text-[#e5ff00] animate-spin" />
+        </div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex h-5 w-5 items-center justify-center border border-[#e5ff00] bg-[#e5ff00] rounded-xs animate-bounce">
+            <Disc className="h-3 w-3 text-black" />
+          </div>
+          <span className="text-[9px] uppercase font-black text-[#e5ff00] tracking-widest">
+            SPARKZ // VINYL BITS ALERT!
+          </span>
+        </div>
+        <div className="text-zinc-100 font-bold leading-relaxed text-xs">
+          <span className="text-[#e5ff00] uppercase font-black">@{m.donor_username || "Someone"}</span> supported with <span className="inline-flex items-center gap-1 border border-[#e5ff00]/40 bg-[#e5ff00]/25 px-1.5 py-0.5 text-[11px] text-white font-black rounded-xs">💿 {m.vinyl_bits_amount} VINYL BITS</span>
+        </div>
+        <div className="text-[8px] text-zinc-500 uppercase mt-1">
+          100% OF FUNDS GO DIRECTLY TO STREAMER!
+        </div>
+      </div>
+    );
+  }
 
   if (isSystemCommand) {
     return (

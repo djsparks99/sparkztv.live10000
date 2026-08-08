@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, Link } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { Toaster } from "@/components/ui/sonner";
+import { ArrowRight } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import LiveSidebar from "@/components/LiveSidebar";
 import UsernameLockModal from "@/components/UsernameLockModal";
@@ -13,6 +14,7 @@ import Register from "@/pages/Register";
 import Channel from "@/pages/Channel";
 import Dashboard from "@/pages/Dashboard";
 import Profile from "@/pages/Profile";
+import Payouts from "@/pages/Payouts";
 import Lounge from "@/pages/Lounge";
 import ObsOverlay from "@/pages/ObsOverlay";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
@@ -62,16 +64,49 @@ function SiteLayout() {
   useLivepeerAutoPoll();
   const sidebarWidthClass = collapsed ? "lg:pl-[60px]" : "lg:pl-[240px]";
 
+  // If user is null (loaded but not authenticated), show the banner
+  const showJoinBanner = user === null;
+
   return (
     <>
       <Navbar />
       <LiveSidebar />
-      <div className={`${sidebarWidthClass} pt-16`}>
+      <div className={`${sidebarWidthClass} pt-16 ${showJoinBanner ? "pb-24 sm:pb-20" : ""} transition-all duration-300`}>
         <main className="relative z-10">
           <Outlet />
         </main>
         <Footer />
       </div>
+
+      {showJoinBanner && (
+        <div
+          id="join-fixed-banner"
+          className={`fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5ff00]/80 bg-[#050505]/95 backdrop-blur-md px-4 py-4 sm:px-6 md:px-8 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] transition-all duration-300 ${sidebarWidthClass} animate-banner-slide`}
+        >
+          <div className="w-full max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 self-start sm:self-center">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e5ff00] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e5ff00]"></span>
+              </span>
+              <p className="font-mono text-xs sm:text-sm tracking-wider text-zinc-300">
+                join <span className="text-[#e5ff00] font-bold">sparkz.TV</span> and discover the underground
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <Link
+                to="/register"
+                id="join-banner-btn"
+                className="font-mono text-xs font-black uppercase tracking-widest bg-[#e5ff00] text-black border border-[#e5ff00] px-6 py-2.5 flex items-center justify-center gap-2 hover:bg-black hover:text-[#e5ff00] transition-all duration-300 shadow-[0_0_15px_rgba(229,255,0,0.15)] hover:shadow-[0_0_25px_rgba(229,255,0,0.3)] active:scale-95 w-full sm:w-auto"
+              >
+                <span>JOIN NOW</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -109,6 +144,7 @@ export default function App() {
             <Route element={<ProtectedLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/payouts" element={<Payouts />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

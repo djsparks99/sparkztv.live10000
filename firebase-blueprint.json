@@ -19,7 +19,11 @@
         "photo_url": { "type": "string", "required": false },
         "social_share_image_url": { "type": "string", "required": false },
         "bio": { "type": "string", "required": false },
-        "created_at": { "type": "string", "required": true }
+        "created_at": { "type": "string", "required": true },
+        "vinyl_bits": { "type": "number", "required": false },
+        "accumulated_bits_balance": { "type": "number", "required": false },
+        "payout_method": { "type": "string", "required": false },
+        "payout_details": { "type": "string", "required": false }
       }
     },
     "channels": {
@@ -132,6 +136,28 @@
         "description": { "type": "string", "required": false },
         "pinned": { "type": "boolean", "required": true },
         "created_at": { "type": "string", "required": true }
+      }
+    },
+    "payouts": {
+      "path": "payouts/{payoutId}",
+      "description": "Historical payouts triggered at the end of the month",
+      "allow": {
+        "read": "request.auth != null && (resource.data.streamer_uid == request.auth.uid || request.auth.token.email == 'markysparks99@gmail.com')",
+        "create": "request.auth != null",
+        "update": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "delete": "false"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "streamer_uid": { "type": "string", "required": true },
+        "streamer_username": { "type": "string", "required": true },
+        "amount_bits": { "type": "number", "required": true },
+        "amount_usd": { "type": "number", "required": true },
+        "payout_method": { "type": "string", "required": true },
+        "payout_details": { "type": "string", "required": true },
+        "status": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true },
+        "processed_at": { "type": "string", "required": false }
       }
     }
   }

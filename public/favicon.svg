@@ -36,11 +36,11 @@
     opacity="0.45" 
   />
 
-  <!-- LAYER 1: Thick Outer Crisp White Border -->
+  <!-- LAYER 1: Thick Outer Crisp Yellow Border -->
   <path 
     d="M 155,110 H 357 A 45,45 0 0,1 402,155 V 305 A 45,45 0 0,1 357,350 H 175 C 140,350 100,380 90,410 C 105,380 110,350 110,335 V 155 A 45,45 0 0,1 155,110 Z" 
-    fill="#ffffff" 
-    stroke="#ffffff" 
+    fill="#e5ff00" 
+    stroke="#e5ff00" 
     stroke-width="26" 
     stroke-linejoin="round" 
   />

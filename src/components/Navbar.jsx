@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { Radio, User, LogOut, LayoutDashboard, Settings, Tv, ChevronDown, Search, Sun, Moon, Compass, Layers, MessageSquare } from "lucide-react";
+import { Radio, User, LogOut, LayoutDashboard, Settings, Tv, ChevronDown, Search, Sun, Moon, Compass, Layers, MessageSquare, Coins } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
 // Transparent yellow speech bubble logo sticker icon with cute cartoon eyes
@@ -12,6 +12,8 @@ function SpeechBubbleLogo({ className = "h-10 w-10" }) {
       className={className}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      shapeRendering="geometricPrecision"
+      textRendering="geometricPrecision"
     >
       <defs>
         <linearGradient id="bubbleYellowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -20,22 +22,28 @@ function SpeechBubbleLogo({ className = "h-10 w-10" }) {
         </linearGradient>
       </defs>
 
-      {/* Outer White Sticker Outline */}
+      {/* LAYER 1: Thick Outer Crisp Yellow Border */}
       <path
         d="M 28 12 L 72 12 A 16 16 0 0 1 88 28 L 88 60 A 16 16 0 0 1 72 76 L 34 76 L 19 89 C 16 91 11 88 13 84 L 16 75 A 16 16 0 0 1 12 60 L 12 28 A 16 16 0 0 1 28 12 Z"
-        fill="#ffffff"
-        stroke="#ffffff"
-        strokeWidth="6"
+        fill="#e5ff00"
+        stroke="#e5ff00"
+        strokeWidth="10"
         strokeLinejoin="round"
       />
 
-      {/* Inner Black Outline & Yellow Fill */}
+      {/* LAYER 2: Sleek Dark Outline (Creates the high-contrast separation) */}
       <path
-        d="M 28 15 L 72 15 A 13 13 0 0 1 85 28 L 85 58 A 13 13 0 0 1 72 71 L 34 71 L 21 82 C 19 83.5 16 81.5 17 78.5 L 18.5 70.5 A 13 13 0 0 1 15 58 L 15 28 A 13 13 0 0 1 28 15 Z"
-        fill="url(#bubbleYellowGrad)"
+        d="M 28 12 L 72 12 A 16 16 0 0 1 88 28 L 88 60 A 16 16 0 0 1 72 76 L 34 76 L 19 89 C 16 91 11 88 13 84 L 16 75 A 16 16 0 0 1 12 60 L 12 28 A 16 16 0 0 1 28 12 Z"
+        fill="#0d0d0d"
         stroke="#0d0d0d"
-        strokeWidth="5"
+        strokeWidth="4"
         strokeLinejoin="round"
+      />
+
+      {/* LAYER 3: Main Solid Neon Yellow/Green Chat Bubble Fill */}
+      <path
+        d="M 28 12 L 72 12 A 16 16 0 0 1 88 28 L 88 60 A 16 16 0 0 1 72 76 L 34 76 L 19 89 C 16 91 11 88 13 84 L 16 75 A 16 16 0 0 1 12 60 L 12 28 A 16 16 0 0 1 28 12 Z"
+        fill="url(#bubbleYellowGrad)"
       />
 
       {/* Left Cartoon Eye */}
@@ -279,6 +287,13 @@ function UserMenu({ user, onLogout }) {
           testid="user-menu-profile"
         >
           PROFILE SETTINGS
+        </MenuLink>
+        <MenuLink
+          to="/payouts"
+          icon={<Coins className="h-3.5 w-3.5" />}
+          testid="user-menu-payouts"
+        >
+          PAYOUTS
         </MenuLink>
         <DropdownMenuSeparator className="my-0 bg-[#27272a]" />
         <MenuLink
