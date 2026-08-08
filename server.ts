@@ -30,16 +30,26 @@ try {
   const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
   if (fs.existsSync(firebaseConfigPath)) {
     firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
+    const hasGoogleCreds = !!(
+      process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+      process.env.K_SERVICE ||
+      process.env.GAE_SERVICE ||
+      process.env.AUTHORIZED_SERVICE_ACCOUNT_EMAIL
+    );
     if (firebaseConfig.projectId) {
-      const firebaseApp = initializeApp({
-        projectId: firebaseConfig.projectId,
-      });
-      if (firebaseConfig.firestoreDatabaseId) {
-        dbFirestore = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+      if (hasGoogleCreds) {
+        const firebaseApp = initializeApp({
+          projectId: firebaseConfig.projectId,
+        });
+        if (firebaseConfig.firestoreDatabaseId) {
+          dbFirestore = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+        } else {
+          dbFirestore = getFirestore(firebaseApp);
+        }
+        console.log("[Firebase Admin] Initialized successfully with projectId:", firebaseConfig.projectId);
       } else {
-        dbFirestore = getFirestore(firebaseApp);
+        console.log("[Firebase Admin] Non-Google Cloud environment detected (e.g. Render). Using Firestore REST API for database synchronization.");
       }
-      console.log("[Firebase Admin] Initialized successfully with projectId:", firebaseConfig.projectId);
     }
   }
 } catch (e: any) {
@@ -125,6 +135,82 @@ async function getFirestoreCollectionRest(collectionName: string): Promise<any[]
   return [];
 }
 
+// REST-based Document Set Fallback Helper
+async function setFirestoreDocRest(collectionName: string, docId: string, data: Record<string, any>, merge = true): Promise<boolean> {
+  if (!firebaseConfig) return false;
+  const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+  
+  function encodeValue(val: any): any {
+    if (val === null || val === undefined) return { nullValue: null };
+    if (typeof val === "boolean") return { booleanValue: val };
+    if (typeof val === "number") {
+      if (Number.isInteger(val)) return { integerValue: val.toString() };
+      return { doubleValue: val };
+    }
+    if (typeof val === "string") return { stringValue: val };
+    if (val instanceof Date) return { timestampValue: val.toISOString() };
+    if (Array.isArray(val)) {
+      return { arrayValue: { values: val.map(encodeValue) } };
+    }
+    if (typeof val === "object") {
+      const fields: Record<string, any> = {};
+      for (const [k, v] of Object.entries(val)) {
+        fields[k] = encodeValue(v);
+      }
+      return { mapValue: { fields } };
+    }
+    return { stringValue: String(val) };
+  }
+
+  const fields: Record<string, any> = {};
+  for (const [k, v] of Object.entries(data)) {
+    fields[k] = encodeValue(v);
+  }
+
+  let url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/${collectionName}/${docId}?key=${firebaseConfig.apiKey}`;
+  if (merge) {
+    for (const key of Object.keys(data)) {
+      url += `&updateMask.fieldPaths=${encodeURIComponent(key)}`;
+    }
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn(`[Firestore REST] Write failed for ${collectionName}/${docId}:`, text);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.warn(`[Firestore REST] Write exception for ${collectionName}/${docId}:`, sanitizeErrorMsg(err.message));
+    return false;
+  }
+}
+
+// Unified Set Document Helper
+async function setFirestoreDocSafe(collectionName: string, docId: string, data: Record<string, any>, merge = true): Promise<boolean> {
+  if (!dbFirestore) {
+    return setFirestoreDocRest(collectionName, docId, data, merge);
+  }
+  try {
+    await dbFirestore.collection(collectionName).doc(docId).set(data, { merge });
+    return true;
+  } catch (err: any) {
+    if (err.message.includes("default credentials") || err.message.includes("credential") || err.message.includes("PERMISSION_DENIED") || err.message.includes("permissions") || err.message.includes("access")) {
+      return setFirestoreDocRest(collectionName, docId, data, merge);
+    }
+    console.warn(`[Firestore Safe] Write failed:`, sanitizeErrorMsg(err.message));
+  }
+  return false;
+}
+
 // Unified Get Document Helper
 async function getFirestoreDocSafe(collectionName: string, docId: string): Promise<any> {
   if (!dbFirestore) {
@@ -180,27 +266,25 @@ async function updateFirestoreChannelLiveStatus(isLive: boolean) {
       }
     }
 
-    if (dbFirestore) {
-      const primaryDocId = "nsU1v44XFnN3FloJvNePqj6cBG2";
-      
-      const updatePayload: Record<string, any> = {
-        is_live: isLive,
-        isLive: isLive,
-        last_updated: nowIso,
-      };
+    const primaryDocId = "nsU1v44XFnN3FloJvNePqj6cBG2";
+    
+    const updatePayload: Record<string, any> = {
+      is_live: isLive,
+      isLive: isLive,
+      last_updated: nowIso,
+    };
 
-      if (isLive) {
-        updatePayload.stream_started_at = masterChan?.stream_started_at || nowIso;
-      } else {
-        updatePayload.stream_started_at = null;
-      }
-
-      // Update both document keys to cover all lookup types in Firestore
-      await dbFirestore.collection("channels").doc(primaryDocId).set(updatePayload, { merge: true });
-      await dbFirestore.collection("channels").doc("djsparkz").set(updatePayload, { merge: true });
-      
-      console.log(`[Firebase Admin] Successfully set channel live status to ${isLive} in Firestore.`);
+    if (isLive) {
+      updatePayload.stream_started_at = masterChan?.stream_started_at || nowIso;
+    } else {
+      updatePayload.stream_started_at = null;
     }
+
+    // Update both document keys to cover all lookup types in Firestore
+    await setFirestoreDocSafe("channels", primaryDocId, updatePayload, true);
+    await setFirestoreDocSafe("channels", "djsparkz", updatePayload, true);
+    
+    console.log(`[Firestore] Successfully set channel live status to ${isLive} in Firestore.`);
   } catch (e: any) {
     console.error("[Firebase Admin] Failed to update Firestore channel status:", sanitizeErrorMsg(e.message));
   }
@@ -1004,23 +1088,19 @@ async function startServer() {
         incremented = true;
         console.log(`[View Tracker] IP ${ip} successfully tracked for channel ${channelId}. Count: ${matchedChannel.viewer_count}`);
 
-        // Persist to Firestore if initialized
-        if (dbFirestore) {
+        // Persist to Firestore
+        const docId = matchedChannel.user_uid || matchedChannel.channel_id || matchedChannel.username;
+        if (docId) {
           try {
-            const docId = matchedChannel.user_uid || matchedChannel.channel_id || matchedChannel.username;
-            if (docId) {
-              await dbFirestore.collection("channels").doc(docId).set({
-                viewer_count: matchedChannel.viewer_count,
-                last_updated: new Date().toISOString()
-              }, { merge: true });
-              
-              // Ensure master alias "djsparkz" doc is also in sync
-              if (normalizedId === "djsparkz" || matchedChannel.username === "djsparkz") {
-                await dbFirestore.collection("channels").doc("djsparkz").set({
-                  viewer_count: matchedChannel.viewer_count,
-                  last_updated: new Date().toISOString()
-                }, { merge: true });
-              }
+            const payload = {
+              viewer_count: matchedChannel.viewer_count,
+              last_updated: new Date().toISOString()
+            };
+            await setFirestoreDocSafe("channels", docId, payload, true);
+            
+            // Ensure master alias "djsparkz" doc is also in sync
+            if (normalizedId === "djsparkz" || matchedChannel.username === "djsparkz") {
+              await setFirestoreDocSafe("channels", "djsparkz", payload, true);
             }
           } catch (fsErr: any) {
             console.error(`[View Tracker] Firestore update failed:`, sanitizeErrorMsg(fsErr.message));
@@ -1170,15 +1250,7 @@ async function startServer() {
     user.vinyl_bits = (user.vinyl_bits || 0) + amt;
     db.users.set(user.uid, user);
     
-    if (dbFirestore) {
-      try {
-        await dbFirestore.collection("users").doc(user.uid).set({
-          vinyl_bits: user.vinyl_bits
-        }, { merge: true });
-      } catch (err: any) {
-        console.error("[Firestore] Failed to update user vinyl bits on purchase:", sanitizeErrorMsg(err.message));
-      }
-    }
+    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
     
     return res.json({
       success: true,
@@ -1228,19 +1300,8 @@ async function startServer() {
     streamer.accumulated_bits_balance = (streamer.accumulated_bits_balance || 0) + amt;
     db.users.set(streamer.uid, streamer);
     
-    if (dbFirestore) {
-      try {
-        await dbFirestore.collection("users").doc(user.uid).set({
-          vinyl_bits: user.vinyl_bits
-        }, { merge: true });
-        
-        await dbFirestore.collection("users").doc(streamer.uid).set({
-          accumulated_bits_balance: streamer.accumulated_bits_balance
-        }, { merge: true });
-      } catch (err: any) {
-        console.error("[Firestore] Failed to update balances on bits drop:", sanitizeErrorMsg(err.message));
-      }
-    }
+    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
+    await setFirestoreDocSafe("users", streamer.uid, { accumulated_bits_balance: streamer.accumulated_bits_balance }, true);
     
     // Trigger chat alert (WebSocket broadcast)
     const messagePayload = {
@@ -1305,16 +1366,10 @@ async function startServer() {
     user.payout_details = details.trim();
     db.users.set(user.uid, user);
     
-    if (dbFirestore) {
-      try {
-        await dbFirestore.collection("users").doc(user.uid).set({
-          payout_method: user.payout_method,
-          payout_details: user.payout_details
-        }, { merge: true });
-      } catch (err: any) {
-        console.error("[Firestore] Failed to update user payout config:", sanitizeErrorMsg(err.message));
-      }
-    }
+    await setFirestoreDocSafe("users", user.uid, {
+      payout_method: user.payout_method,
+      payout_details: user.payout_details
+    }, true);
     
     return res.json({
       success: true,
@@ -1330,18 +1385,17 @@ async function startServer() {
     }
     
     let payoutsList: any[] = [];
-    if (dbFirestore) {
-      try {
-        const snap = await dbFirestore.collection("payouts")
-          .where("streamer_uid", "==", user.uid)
-          .get();
-        snap.forEach((doc: any) => {
-          payoutsList.push({ id: doc.id, ...doc.data() });
-        });
-        payoutsList.sort((a, b) => b.created_at.localeCompare(a.created_at));
-      } catch (err: any) {
-        console.error("[Firestore] Failed to get payouts history:", sanitizeErrorMsg(err.message));
-      }
+    try {
+      const snap = await getFirestoreCollectionSafe("payouts");
+      snap.forEach((doc: any) => {
+        const d = doc.data();
+        if (d && d.streamer_uid === user.uid) {
+          payoutsList.push({ id: doc.id, ...d });
+        }
+      });
+      payoutsList.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    } catch (err: any) {
+      console.error("[Firestore] Failed to get payouts history:", sanitizeErrorMsg(err.message));
     }
     
     if (payoutsList.length === 0) {
@@ -1384,31 +1438,21 @@ async function startServer() {
         
         localPayoutsStore.push(payoutRecord);
         
-        if (dbFirestore) {
-          try {
-            await dbFirestore.collection("payouts").doc(payoutId).set(payoutRecord);
-            await dbFirestore.collection("users").doc(user.uid).set({
-              accumulated_bits_balance: 0
-            }, { merge: true });
-            
-            setTimeout(async () => {
-              payoutRecord.status = "paid";
-              payoutRecord.processed_at = new Date().toISOString();
-              await dbFirestore.collection("payouts").doc(payoutId).set({
-                status: "paid",
-                processed_at: payoutRecord.processed_at
-              }, { merge: true });
-              console.log(`[Payout Scheduler] Payout ${payoutId} for streamer ${user.username} processed successfully.`);
-            }, 5000);
-          } catch (err: any) {
-            console.error(`[Payout Scheduler] Firestore failed for user ${user.uid}:`, sanitizeErrorMsg(err.message));
-          }
-        } else {
-          setTimeout(() => {
+        try {
+          await setFirestoreDocSafe("payouts", payoutId, payoutRecord, false);
+          await setFirestoreDocSafe("users", user.uid, { accumulated_bits_balance: 0 }, true);
+          
+          setTimeout(async () => {
             payoutRecord.status = "paid";
             payoutRecord.processed_at = new Date().toISOString();
-            console.log(`[Payout Scheduler] Payout ${payoutId} for streamer ${user.username} processed successfully (in-memory).`);
+            await setFirestoreDocSafe("payouts", payoutId, {
+              status: "paid",
+              processed_at: payoutRecord.processed_at
+            }, true);
+            console.log(`[Payout Scheduler] Payout ${payoutId} for streamer ${user.username} processed successfully.`);
           }, 5000);
+        } catch (err: any) {
+          console.error(`[Payout Scheduler] Firestore failed for user ${user.uid}:`, sanitizeErrorMsg(err.message));
         }
       }
     }
