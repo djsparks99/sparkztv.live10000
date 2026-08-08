@@ -152,7 +152,22 @@ async function getFirestoreCollectionRest(collectionName: string): Promise<any[]
 }
 
 // REST-based Document Set Fallback Helper
-async function setFirestoreDocRest(collectionName: string, docId: string, data: Record<string, any>, merge = true): Promise<boolean> {
+async function getMetadataToken(): Promise<string | null> {
+  try {
+    const res = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-account/default/token", {
+      headers: { "Metadata-Flavor": "Google" }
+    });
+    if (res.ok) {
+      const json = await res.json() as any;
+      return json.access_token || null;
+    }
+  } catch (e) {
+    // silent fail in local/non-gcp
+  }
+  return null;
+}
+
+async function setFirestoreDocRest(collectionName: string, docId: string, data: Record<string, any>, merge = true, authToken?: string): Promise<boolean> {
   if (!firebaseConfig) return false;
   const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
   
@@ -191,11 +206,22 @@ async function setFirestoreDocRest(collectionName: string, docId: string, data: 
   }
 
   try {
+    let token = authToken;
+    if (!token) {
+      token = await getMetadataToken();
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    if (token) {
+      headers["Authorization"] = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
+    }
+
     const res = await fetch(url, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({ fields })
     });
     if (!res.ok) {
@@ -211,16 +237,16 @@ async function setFirestoreDocRest(collectionName: string, docId: string, data: 
 }
 
 // Unified Set Document Helper
-async function setFirestoreDocSafe(collectionName: string, docId: string, data: Record<string, any>, merge = true): Promise<boolean> {
+async function setFirestoreDocSafe(collectionName: string, docId: string, data: Record<string, any>, merge = true, authToken?: string): Promise<boolean> {
   if (!dbFirestore) {
-    return setFirestoreDocRest(collectionName, docId, data, merge);
+    return setFirestoreDocRest(collectionName, docId, data, merge, authToken);
   }
   try {
     await dbFirestore.collection(collectionName).doc(docId).set(data, { merge });
     return true;
   } catch (err: any) {
     if (err.message.includes("default credentials") || err.message.includes("credential") || err.message.includes("PERMISSION_DENIED") || err.message.includes("permissions") || err.message.includes("access")) {
-      return setFirestoreDocRest(collectionName, docId, data, merge);
+      return setFirestoreDocRest(collectionName, docId, data, merge, authToken);
     }
     console.warn(`[Firestore Safe] Write failed:`, sanitizeErrorMsg(err.message));
   }
@@ -894,6 +920,7 @@ async function startServer() {
     const fallbackUid = "nsU1v44XFnN3FloJvNePqj6cBG2";
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      req.authToken = null;
       let user = db.users.get(fallbackUid);
       if (!user) {
         user = {
@@ -920,6 +947,7 @@ async function startServer() {
       if (!decodedToken) {
         throw new Error("Invalid JWT token format");
       }
+      req.authToken = token;
       const uid = decodedToken.uid || decodedToken.sub;
       if (!uid) {
         throw new Error("No UID found in JWT");
@@ -1266,7 +1294,7 @@ async function startServer() {
     user.vinyl_bits = (user.vinyl_bits || 0) + amt;
     db.users.set(user.uid, user);
     
-    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
+    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true, req.authToken);
     
     return res.json({
       success: true,
@@ -1319,10 +1347,10 @@ async function startServer() {
         return res.status(500).json({ error: "Stripe Checkout error: " + err.message });
       }
     } else {
-      // Graceful fallback simulation
+      // Graceful fallback simulation - redirect to high-fidelity interactive sandbox checkout
       const simulatedSessionId = `cs_test_${Math.random().toString(36).substring(2, 15)}`;
-      const simulatedUrl = `/payouts?session_id=${simulatedSessionId}&purchase_success=true&amount=${amt}&simulated_checkout=true`;
-      console.log("[Stripe Backend] No STRIPE_SECRET_KEY found. Falling back to simulated Checkout Session.");
+      const simulatedUrl = `/sandbox/checkout?session_id=${simulatedSessionId}&amount=${amt}`;
+      console.log("[Stripe Backend] No STRIPE_SECRET_KEY found. Redirecting to interactive Sandbox Checkout.");
       return res.json({ success: true, url: simulatedUrl, real: false, sessionId: simulatedSessionId });
     }
   });
@@ -1422,7 +1450,7 @@ async function startServer() {
           await setFirestoreDocSafe("users", user.uid, {
             stripe_connect_id: accountId,
             stripe_connect_status: "pending_onboarding",
-          }, true);
+          }, true, req.authToken);
         }
 
         const accountLink = await stripe.accountLinks.create({
@@ -1446,10 +1474,10 @@ async function startServer() {
       await setFirestoreDocSafe("users", user.uid, {
         stripe_connect_id: simAccountId,
         stripe_connect_status: "pending_onboarding",
-      }, true);
+      }, true, req.authToken);
 
-      const simulatedUrl = `${origin}/payouts?connect_success=true&account_id=${simAccountId}&simulated_connect=true`;
-      console.log("[Stripe Connect Backend] No STRIPE_SECRET_KEY found. Falling back to simulated onboarding URL.");
+      const simulatedUrl = `${origin}/sandbox/stripe-connect-onboarding?account_id=${simAccountId}`;
+      console.log("[Stripe Connect Backend] No STRIPE_SECRET_KEY found. Redirecting to interactive Sandbox Onboarding.");
       return res.json({ success: true, url: simulatedUrl, real: false, accountId: simAccountId });
     }
   });
@@ -1481,7 +1509,7 @@ async function startServer() {
           stripe_connect_status: status,
           payout_method: user.payout_method,
           payout_details: user.payout_details,
-        }, true);
+        }, true, req.authToken);
 
         return res.json({
           linked: true,
@@ -1535,7 +1563,7 @@ async function startServer() {
             stripe_connect_status: "active",
             payout_method: "stripe_connect",
             payout_details: accountId,
-          }, true);
+          }, true, req.authToken);
 
           return res.json({
             success: true,
@@ -1561,7 +1589,7 @@ async function startServer() {
         stripe_connect_status: "active",
         payout_method: "stripe_connect",
         payout_details: accountId,
-      }, true);
+      }, true, req.authToken);
 
       return res.json({
         success: true,
@@ -1590,7 +1618,7 @@ async function startServer() {
       stripe_connect_status: null,
       payout_method: user.payout_method,
       payout_details: user.payout_details,
-    }, true);
+    }, true, req.authToken);
 
     return res.json({
       success: true,
@@ -1640,8 +1668,8 @@ async function startServer() {
     streamer.accumulated_bits_balance = (streamer.accumulated_bits_balance || 0) + amt;
     db.users.set(streamer.uid, streamer);
     
-    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true);
-    await setFirestoreDocSafe("users", streamer.uid, { accumulated_bits_balance: streamer.accumulated_bits_balance }, true);
+    await setFirestoreDocSafe("users", user.uid, { vinyl_bits: user.vinyl_bits }, true, req.authToken);
+    await setFirestoreDocSafe("users", streamer.uid, { accumulated_bits_balance: streamer.accumulated_bits_balance }, true, req.authToken);
     
     // Trigger chat alert (WebSocket broadcast)
     const messagePayload = {
@@ -1709,7 +1737,7 @@ async function startServer() {
     await setFirestoreDocSafe("users", user.uid, {
       payout_method: user.payout_method,
       payout_details: user.payout_details
-    }, true);
+    }, true, req.authToken);
     
     return res.json({
       success: true,
@@ -1748,7 +1776,7 @@ async function startServer() {
     });
   });
 
-  async function runEndOfMonthPayouts() {
+  async function runEndOfMonthPayouts(authToken?: string) {
     console.log("[Payout Scheduler] Running automated payout processing...");
     const now = new Date();
     
@@ -1779,8 +1807,8 @@ async function startServer() {
         localPayoutsStore.push(payoutRecord);
         
         try {
-          await setFirestoreDocSafe("payouts", payoutId, payoutRecord, false);
-          await setFirestoreDocSafe("users", user.uid, { accumulated_bits_balance: 0 }, true);
+          await setFirestoreDocSafe("payouts", payoutId, payoutRecord, false, authToken);
+          await setFirestoreDocSafe("users", user.uid, { accumulated_bits_balance: 0 }, true, authToken);
           
           setTimeout(async () => {
             payoutRecord.status = "paid";
@@ -1788,7 +1816,7 @@ async function startServer() {
             await setFirestoreDocSafe("payouts", payoutId, {
               status: "paid",
               processed_at: payoutRecord.processed_at
-            }, true);
+            }, true, authToken);
             console.log(`[Payout Scheduler] Payout ${payoutId} for streamer ${user.username} processed successfully.`);
           }, 5000);
         } catch (err: any) {
@@ -1813,7 +1841,7 @@ async function startServer() {
       return res.status(401).json({ error: "Unauthorized" });
     }
     
-    await runEndOfMonthPayouts();
+    await runEndOfMonthPayouts(req.authToken);
     return res.json({ success: true, message: "End-of-month payouts executed successfully!" });
   });
 

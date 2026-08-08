@@ -17,6 +17,9 @@ import Profile from "@/pages/Profile";
 import Payouts from "@/pages/Payouts";
 import Lounge from "@/pages/Lounge";
 import ObsOverlay from "@/pages/ObsOverlay";
+import SandboxCheckout from "@/pages/SandboxCheckout";
+import SandboxStripeOnboarding from "@/pages/SandboxStripeOnboarding";
+import SandboxExpressDashboard from "@/pages/SandboxExpressDashboard";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 
 const SIDEBAR_STORAGE_KEY = "sparkz_sidebar_collapsed";
@@ -134,6 +137,14 @@ export default function App() {
         <ScrollToTop />
         <Routes>
           <Route path="/overlay/:username" element={<ObsOverlay />} />
+          
+          {/* Standalone pages protected by Authentication */}
+          <Route element={<ProtectedLayout />}>
+            <Route path="/sandbox/checkout" element={<SandboxCheckout />} />
+            <Route path="/sandbox/stripe-connect-onboarding" element={<SandboxStripeOnboarding />} />
+            <Route path="/sandbox/express-dashboard" element={<SandboxExpressDashboard />} />
+          </Route>
+
           <Route element={<SiteLayout />}>
             <Route path="/" element={<Browse />} />
             <Route path="/directory" element={<Directory />} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, apiErrorMessage } from "@/lib/api";
 import { toast } from "sonner";
 import { 
@@ -269,21 +270,28 @@ export default function PayoutsSettings({ onStatusChange }) {
           </div>
 
           <div className="grid grid-cols-2 gap-2 pt-2">
-            <a
-              href={isReal ? "https://dashboard.stripe.com" : "#"}
-              target={isReal ? "_blank" : undefined}
-              rel="noopener noreferrer"
-              onClick={(e) => {
-                if (!isReal) {
-                  e.preventDefault();
-                  toast.info("In Sandbox mode, Stripe Express dashboard links are simulated.");
-                }
-              }}
-              className="border border-zinc-800 bg-zinc-950 text-[#e5ff00] hover:border-[#e5ff00] text-[10px] py-2 uppercase font-bold tracking-widest flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <span>STRIPE EXPRESS PORTAL</span>
-              <ExternalLink className="h-3 w-3" />
-            </a>
+            {isReal ? (
+              <a
+                href="https://dashboard.stripe.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-zinc-800 bg-zinc-950 text-[#e5ff00] hover:border-[#e5ff00] text-[10px] py-2 uppercase font-bold tracking-widest flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <span>STRIPE EXPRESS PORTAL</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : (
+              <Link
+                to="/sandbox/express-dashboard"
+                onClick={() => {
+                  toast.success("Redirecting to interactive simulated Stripe Express Portal...");
+                }}
+                className="border border-zinc-800 bg-zinc-950 text-[#e5ff00] hover:border-[#e5ff00] text-[10px] py-2 uppercase font-bold tracking-widest flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <span>STRIPE EXPRESS PORTAL</span>
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
             
             <button
               type="button"
