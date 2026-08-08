@@ -9,10 +9,8 @@ import {
   CreditCard, 
   ArrowRight, 
   History, 
-  Cpu, 
   RefreshCw, 
   Sparkles, 
-  ShieldAlert,
   Disc
 } from "lucide-react";
 
@@ -38,10 +36,6 @@ export default function Payouts() {
   const [purchasing, setPurchasing] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   
-  // Sandbox Admin State
-  const [triggeringPayouts, setTriggeringPayouts] = useState(false);
-  const [simulationLogs, setSimulationLogs] = useState([]);
-
   // Fetch balances and history
   const fetchData = async () => {
     if (!user) return;
@@ -167,39 +161,6 @@ export default function Payouts() {
     }
   };
 
-  // Admin simulated trigger
-  const handleSimulatePayouts = async () => {
-    setTriggeringPayouts(true);
-    setSimulationLogs(["[INIT] Booting automated payouts engine...", "[INFO] Fetching accumulated streamer balances...", "[INFO] Calculating exact 100% payout conversions (1 Bit = $0.01 USD)..."]);
-    
-    try {
-      const { data } = await api.post("/admin/trigger-payouts");
-      
-      setTimeout(() => {
-        setSimulationLogs(prev => [...prev, `[PROCESS] Processing accumulated balance of ${balances.accumulated_bits_balance} Bits for user @${user.username}...`]);
-      }, 1000);
-      
-      setTimeout(() => {
-        setSimulationLogs(prev => [...prev, `[LEDGER] Writing payout record to Firestore collection '/payouts' ...`, `[DB] Zeroing out accumulated_bits_balance for streamer @${user.username}...`]);
-      }, 2500);
-
-      setTimeout(() => {
-        setSimulationLogs(prev => [...prev, `[CRON] Automated monthly payout cycle triggered successfully!`, `[INFO] Payout set to 'processing'. Transacting via ${payoutMethod.toUpperCase()}...`]);
-        toast.success(data.message || "Payout simulated successfully!");
-        fetchData();
-        fetchHistory();
-        setTriggeringPayouts(false);
-      }, 4000);
-
-    } catch (err) {
-      setSimulationLogs(prev => [...prev, `[ERROR] Automated payout cron job failed: ${apiErrorMessage(err)}`]);
-      toast.error("Failed to run simulated payouts.");
-      setTriggeringPayouts(false);
-    }
-  };
-
-  const isDjsparks = user?.email === "markysparks99@gmail.com" || user?.username === "djsparkz";
-
   return (
     <div className="mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-8 font-mono text-white min-h-screen">
       
@@ -210,7 +171,7 @@ export default function Payouts() {
           <span>PAYOUT HUB // VINYL BITS</span>
         </h1>
         <p className="text-xs text-zinc-500 mt-2 max-w-2xl uppercase">
-          Configure streamer payout configurations, check your support ledger, buy/spend bits, and simulate automated end-of-the-month cycles.
+          Configure streamer payout configurations, check your support ledger, and buy/spend Vinyl Bits.
         </p>
       </div>
 
@@ -355,67 +316,6 @@ export default function Payouts() {
                   </table>
                 </div>
               )}
-            </div>
-
-            {/* 5. DEVELOPER SIMULATION BOARD */}
-            <div className="border border-zinc-800 bg-[#08080a] p-6 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4">
-                <Cpu className="h-5 w-5 text-zinc-700" />
-              </div>
-              <div className="text-[10px] uppercase tracking-widest text-[#e5ff00] font-bold mb-1">// SANDBOX ENGINE</div>
-              <h2 className="text-xs uppercase font-black text-white tracking-widest mb-2 flex items-center gap-1.5">
-                <ShieldAlert className="h-4 w-4 text-[#e5ff00]" />
-                <span>DEVELOPER PAYOUTS SIMULATOR</span>
-              </h2>
-              <p className="text-[10px] text-zinc-400 uppercase leading-relaxed mb-4 max-w-xl">
-                Testing the end-of-the-month cron schedule is instantaneous. Use this controller to trigger the backend calculation routine, settling streamer balances and publishing records.
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                <div className="md:col-span-1 space-y-3">
-                  <button
-                    onClick={handleSimulatePayouts}
-                    disabled={triggeringPayouts || balances.accumulated_bits_balance === 0}
-                    className={`w-full py-3 px-4 border font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(229,255,0,0.05)] ${
-                      balances.accumulated_bits_balance > 0 
-                        ? "border-[#e5ff00] bg-[#e5ff00] text-black hover:bg-[#c3d900] cursor-pointer" 
-                        : "border-zinc-800 bg-zinc-950 text-zinc-600 cursor-not-allowed"
-                    }`}
-                  >
-                    {triggeringPayouts ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <span>TRIGGER CYCLE</span>
-                    )}
-                  </button>
-                  {balances.accumulated_bits_balance === 0 && (
-                    <div className="text-[9px] text-amber-500/70 border border-amber-500/20 bg-amber-500/5 p-2 uppercase leading-snug">
-                      Notice: Accumulated balance is 0. Go to a live channel chat and drop Vinyl Bits to support, then trigger.
-                    </div>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <div className="bg-black border border-zinc-900 p-3 h-28 overflow-y-auto scrollbar-thin text-[10px] font-mono text-zinc-500 space-y-1 select-none">
-                    <div className="text-zinc-600">// LIVE SCHEDULER LOG OUTPUT:</div>
-                    {simulationLogs.length === 0 ? (
-                      <div className="text-zinc-700 italic">Waiting for manual execution run...</div>
-                    ) : (
-                      simulationLogs.map((log, index) => (
-                        <div key={index} className={
-                          log.startsWith("[ERROR]") 
-                            ? "text-red-400 font-bold" 
-                            : log.startsWith("[CRON]") || log.startsWith("[INIT]")
-                            ? "text-[#e5ff00] font-bold"
-                            : "text-zinc-400"
-                        }>
-                          {log}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
             </div>
 
           </div>

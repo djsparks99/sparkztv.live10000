@@ -528,10 +528,10 @@ class InMemStore {
       created_at: now,
       watts: 2500,
       follows: [],
-      vinyl_bits: 5000,
-      accumulated_bits_balance: 14500,
-      payout_method: "paypal",
-      payout_details: "djsparkz@sparkz.tv",
+      vinyl_bits: 0,
+      accumulated_bits_balance: 0,
+      payout_method: null,
+      payout_details: null,
     };
     this.users.set(djsparkzUser.uid, djsparkzUser);
   }
@@ -539,32 +539,7 @@ class InMemStore {
 
 const db = new InMemStore();
 
-const localPayoutsStore: any[] = [
-  {
-    id: "pay-seed-1",
-    streamer_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-    streamer_username: "djsparkz",
-    amount_bits: 25000,
-    amount_usd: 250.00,
-    payout_method: "paypal",
-    payout_details: "djsparkz@sparkz.tv",
-    status: "paid",
-    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-    processed_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000 + 5000).toISOString()
-  },
-  {
-    id: "pay-seed-2",
-    streamer_uid: "nsU1v44XFnN3FloJvNePqj6cBG2",
-    streamer_username: "djsparkz",
-    amount_bits: 12800,
-    amount_usd: 128.00,
-    payout_method: "stripe",
-    payout_details: "acct_1NJ938FS92N48SJ9",
-    status: "paid",
-    created_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-    processed_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000 + 5000).toISOString()
-  }
-];
+const localPayoutsStore: any[] = [];
 
 const activeViewersPerRoom = new Map<string, Set<string>>();
 const viewCache = new Map<string, number>();
@@ -1172,7 +1147,7 @@ async function startServer() {
     }
   });
 
-  api.get("/channels/mine/schedules", async (req, res) => {
+  api.get("/channels/mine/schedules", authMiddleware, async (req: any, res) => {
     try {
       const channel = await getMasterChannel();
       return res.json(channel.schedules || []);
@@ -1181,9 +1156,18 @@ async function startServer() {
     }
   });
 
-  api.post("/channels/mine/schedules", async (req, res) => {
+  api.post("/channels/mine/schedules", authMiddleware, async (req: any, res) => {
     try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const channel = await getMasterChannel();
+      if (channel.user_uid !== user.uid && user.username !== "djsparkz") {
+        return res.status(403).json({ error: "Access Denied: You do not own this channel" });
+      }
+
       if (!channel.schedules) channel.schedules = [];
 
       const newSchedule = {
@@ -1192,18 +1176,47 @@ async function startServer() {
         description: req.body.description || "",
         startTime: req.body.startTime || new Date().toISOString(),
         imageUrl: req.body.imageUrl || req.body.image || null,
+        day: req.body.day || "FRI",
+        time: req.body.time || "20:00 UTC",
+        genre: req.body.genre || "dnb",
       };
 
       channel.schedules.push(newSchedule);
+
+      // Persist to Firestore
+      const schedulePayload = {
+        schedules: channel.schedules,
+        schedule: channel.schedules.length > 0 ? channel.schedules[0] : null,
+        schedule_json: JSON.stringify(channel.schedules),
+        last_updated: new Date().toISOString(),
+      };
+
+      if (channel.username) {
+        await setFirestoreDocSafe("channels", channel.username.toLowerCase(), schedulePayload, true, req.authToken);
+        await setFirestoreDocSafe("channels", channel.username, schedulePayload, true, req.authToken);
+      }
+      if (channel.channel_id) {
+        await setFirestoreDocSafe("channels", channel.channel_id, schedulePayload, true, req.authToken);
+      }
+
       return res.json({ success: true, schedules: channel.schedules });
     } catch (e: any) {
       return res.status(500).json({ error: "Failed to create schedule" });
     }
   });
 
-  api.put("/channels/mine/schedules/:id", async (req, res) => {
+  api.put("/channels/mine/schedules/:id", authMiddleware, async (req: any, res) => {
     try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const channel = await getMasterChannel();
+      if (channel.user_uid !== user.uid && user.username !== "djsparkz") {
+        return res.status(403).json({ error: "Access Denied: You do not own this channel" });
+      }
+
       if (!channel.schedules) channel.schedules = [];
 
       const schedId = req.params.id;
@@ -1219,7 +1232,26 @@ async function startServer() {
         description: req.body.description ?? channel.schedules[index].description,
         startTime: req.body.startTime ?? channel.schedules[index].startTime,
         imageUrl: req.body.imageUrl ?? req.body.image ?? channel.schedules[index].imageUrl,
+        day: req.body.day ?? channel.schedules[index].day ?? "FRI",
+        time: req.body.time ?? channel.schedules[index].time ?? "20:00 UTC",
+        genre: req.body.genre ?? channel.schedules[index].genre ?? "dnb",
       };
+
+      // Persist to Firestore
+      const schedulePayload = {
+        schedules: channel.schedules,
+        schedule: channel.schedules.length > 0 ? channel.schedules[0] : null,
+        schedule_json: JSON.stringify(channel.schedules),
+        last_updated: new Date().toISOString(),
+      };
+
+      if (channel.username) {
+        await setFirestoreDocSafe("channels", channel.username.toLowerCase(), schedulePayload, true, req.authToken);
+        await setFirestoreDocSafe("channels", channel.username, schedulePayload, true, req.authToken);
+      }
+      if (channel.channel_id) {
+        await setFirestoreDocSafe("channels", channel.channel_id, schedulePayload, true, req.authToken);
+      }
 
       return res.json({ success: true, schedules: channel.schedules });
     } catch (e: any) {
@@ -1227,13 +1259,38 @@ async function startServer() {
     }
   });
 
-  api.delete("/channels/mine/schedules/:id", async (req, res) => {
+  api.delete("/channels/mine/schedules/:id", authMiddleware, async (req: any, res) => {
     try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       const channel = await getMasterChannel();
+      if (channel.user_uid !== user.uid && user.username !== "djsparkz") {
+        return res.status(403).json({ error: "Access Denied: You do not own this channel" });
+      }
+
       if (!channel.schedules) channel.schedules = [];
 
       const schedId = req.params.id;
       channel.schedules = channel.schedules.filter((s: any) => s.id !== schedId);
+
+      // Persist to Firestore
+      const schedulePayload = {
+        schedules: channel.schedules,
+        schedule: channel.schedules.length > 0 ? channel.schedules[0] : null,
+        schedule_json: JSON.stringify(channel.schedules),
+        last_updated: new Date().toISOString(),
+      };
+
+      if (channel.username) {
+        await setFirestoreDocSafe("channels", channel.username.toLowerCase(), schedulePayload, true, req.authToken);
+        await setFirestoreDocSafe("channels", channel.username, schedulePayload, true, req.authToken);
+      }
+      if (channel.channel_id) {
+        await setFirestoreDocSafe("channels", channel.channel_id, schedulePayload, true, req.authToken);
+      }
 
       return res.json({ success: true, schedules: channel.schedules });
     } catch (e: any) {
@@ -1262,18 +1319,41 @@ async function startServer() {
       return res.status(401).json({ error: "Unauthorized" });
     }
     
-    if (typeof user.vinyl_bits === "undefined") {
-      user.vinyl_bits = 1000;
-      db.users.set(user.uid, user);
-    }
-    if (typeof user.accumulated_bits_balance === "undefined") {
-      user.accumulated_bits_balance = user.username === "djsparkz" ? 14500 : 0;
-      db.users.set(user.uid, user);
+    // Fetch live from Firestore database to ensure real-time accuracy
+    try {
+      const snap = await getFirestoreDocSafe("users", user.uid);
+      if (snap && snap.exists) {
+        const firestoreData = snap.data();
+        if (firestoreData) {
+          user.vinyl_bits = firestoreData.vinyl_bits !== undefined ? firestoreData.vinyl_bits : 0;
+          user.accumulated_bits_balance = firestoreData.accumulated_bits_balance !== undefined ? firestoreData.accumulated_bits_balance : 0;
+          user.payout_method = firestoreData.payout_method || null;
+          user.payout_details = firestoreData.payout_details || null;
+          db.users.set(user.uid, user);
+        }
+      } else {
+        // Fallback initialize if new user
+        if (typeof user.vinyl_bits === "undefined") {
+          user.vinyl_bits = 0;
+        }
+        if (typeof user.accumulated_bits_balance === "undefined") {
+          user.accumulated_bits_balance = 0;
+        }
+        db.users.set(user.uid, user);
+        await setFirestoreDocSafe("users", user.uid, {
+          vinyl_bits: user.vinyl_bits,
+          accumulated_bits_balance: user.accumulated_bits_balance,
+          payout_method: user.payout_method || null,
+          payout_details: user.payout_details || null,
+        }, true, req.authToken);
+      }
+    } catch (err) {
+      console.error("[Firestore] Error loading user vinyl bits live balance:", err);
     }
     
     return res.json({
-      vinyl_bits: user.vinyl_bits,
-      accumulated_bits_balance: user.accumulated_bits_balance,
+      vinyl_bits: user.vinyl_bits || 0,
+      accumulated_bits_balance: user.accumulated_bits_balance || 0,
       payout_method: user.payout_method || null,
       payout_details: user.payout_details || null,
     });
@@ -1757,7 +1837,7 @@ async function startServer() {
       const snap = await getFirestoreCollectionSafe("payouts");
       snap.forEach((doc: any) => {
         const d = doc.data();
-        if (d && d.streamer_uid === user.uid) {
+        if (d && (d.streamer_uid === user.uid || d.streamerId === user.uid || d.streamer_id === user.uid)) {
           payoutsList.push({ id: doc.id, ...d });
         }
       });
@@ -1767,7 +1847,7 @@ async function startServer() {
     }
     
     if (payoutsList.length === 0) {
-      payoutsList = localPayoutsStore.filter(p => p.streamer_uid === user.uid);
+      payoutsList = localPayoutsStore.filter(p => p.streamer_uid === user.uid || p.streamerId === user.uid || p.streamer_id === user.uid);
       payoutsList.sort((a, b) => b.created_at.localeCompare(a.created_at));
     }
     
