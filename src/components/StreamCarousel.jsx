@@ -77,40 +77,7 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
   const [canScrollRight, setCanScrollRight] = useState(true);
   const [subscribedBroadcasters, setSubscribedBroadcasters] = useState([]); // Array of lowercased usernames
 
-  // Dynamic Bannersnack Embed Loader
-  useEffect(() => {
-    // Define the global config for Bannersnack/Creatopy
-    window.bannersnack_embed = {
-      hash: "bdun0xvdy",
-      width: 728,
-      height: 90,
-      t: 1786233694,
-      userId: 35786041,
-      type: "html5"
-    };
 
-    // Load the script within our designated container
-    const container = document.getElementById("bannersnack-embed-container");
-    if (container) {
-      container.innerHTML = "";
-      const script = document.createElement("script");
-      script.type = "text/javascript";
-      script.src = "https://cdn.bannersnack.com/iframe/embed.js";
-      script.async = true;
-      container.appendChild(script);
-    }
-
-    return () => {
-      // Cleanup on unmount
-      if (window.bannersnack_embed) {
-        delete window.bannersnack_embed;
-      }
-      const container = document.getElementById("bannersnack-embed-container");
-      if (container) {
-        container.innerHTML = "";
-      }
-    };
-  }, []);
 
   // Listen to the user's live notification subscriptions in Firestore
   useEffect(() => {
@@ -297,8 +264,21 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
           <div className="w-full max-w-[728px] overflow-x-auto scrollbar-none flex justify-center">
             <div 
               id="bannersnack-embed-container" 
-              className="w-[728px] h-[90px] shrink-0 bg-[#050507] border border-[#1c1c1f] shadow-[0_0_20px_rgba(0,0,0,0.8)] relative flex items-center justify-center"
-            />
+              className="w-[728px] h-[90px] shrink-0 bg-[#050507] border border-[#1c1c1f] shadow-[0_0_20px_rgba(0,0,0,0.8)] relative overflow-hidden"
+            >
+              <iframe
+                src="//cdn.bannersnack.com/banners/bdun0xvdy/embed/index.html?userId=35786041&t=1786233694"
+                width="100%"
+                height="100%"
+                scrolling="no"
+                frameBorder="0"
+                allow="autoplay"
+                allowFullScreen={true}
+                title="Sparkz Ad Banner"
+                className="w-full h-full"
+                style={{ border: "none", overflow: "hidden" }}
+              />
+            </div>
           </div>
         </div>
 
