@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Eye, Radio, Play, Award, Volume2, ArrowRight, Bell } from "lucide-react";
-import { fileUrl } from "@/lib/api";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Radio, Play, Award, Volume2, ArrowRight, Bell, Copy, Disc, ExternalLink, HelpCircle, Server, Sparkles, Zap, Shield } from "lucide-react";
+import { fileUrl, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import HlsPlayer from "@/components/HlsPlayer";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { db } from "@/lib/firebase";
@@ -76,6 +77,41 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
   const [canScrollRight, setCanScrollRight] = useState(true);
   const [subscribedBroadcasters, setSubscribedBroadcasters] = useState([]); // Array of lowercased usernames
 
+  // Dynamic Bannersnack Embed Loader
+  useEffect(() => {
+    // Define the global config for Bannersnack/Creatopy
+    window.bannersnack_embed = {
+      hash: "bdun0xvdy",
+      width: 728,
+      height: 90,
+      t: 1786233694,
+      userId: 35786041,
+      type: "html5"
+    };
+
+    // Load the script within our designated container
+    const container = document.getElementById("bannersnack-embed-container");
+    if (container) {
+      container.innerHTML = "";
+      const script = document.createElement("script");
+      script.type = "text/javascript";
+      script.src = "https://cdn.bannersnack.com/iframe/embed.js";
+      script.async = true;
+      container.appendChild(script);
+    }
+
+    return () => {
+      // Cleanup on unmount
+      if (window.bannersnack_embed) {
+        delete window.bannersnack_embed;
+      }
+      const container = document.getElementById("bannersnack-embed-container");
+      if (container) {
+        container.innerHTML = "";
+      }
+    };
+  }, []);
+
   // Listen to the user's live notification subscriptions in Firestore
   useEffect(() => {
     if (!user?.uid) {
@@ -103,6 +139,34 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
 
     return () => unsubscribe();
   }, [user?.uid]);
+
+  const channelsList = (allChannels && allChannels.length > 0) ? allChannels : channels;
+
+  // Filter channels to remove generic / empty names and select ONLY live ones
+  const seenUsernames = new Set();
+  const carouselItems = (channelsList || []).filter((c) => {
+    if (!c) return false;
+    const username = (c.username || "").trim().toLowerCase();
+    if (!username || username === "undefined" || username === "channel" || username === "null") {
+      return false;
+    }
+    if (seenUsernames.has(username)) return false;
+    seenUsernames.add(username);
+    return Boolean(c.is_live || c.isLive);
+  });
+
+  const [streamCredentials, setStreamCredentials] = useState(null);
+  const [showStreamKey, setShowStreamKey] = useState(false);
+  const [isCopyingServer, setIsCopyingServer] = useState(false);
+  const [isCopyingKey, setIsCopyingKey] = useState(false);
+
+  useEffect(() => {
+    if (user && carouselItems.length === 0) {
+      api.post("/stream/create")
+        .then(({ data }) => setStreamCredentials(data))
+        .catch((err) => console.warn("Failed to fetch stream credentials:", err));
+    }
+  }, [user, carouselItems.length]);
 
   const handleToggleNotification = async (e, channel) => {
     // Prevent navigating to the channel detail page when clicking the toggle inside the card
@@ -142,21 +206,6 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
       toast.error("Subscription failed. Please check rules or connection.");
     }
   };
-
-  const channelsList = (allChannels && allChannels.length > 0) ? allChannels : channels;
-
-  // Filter channels to remove generic / empty names and select ONLY live ones
-  const seenUsernames = new Set();
-  const carouselItems = (channelsList || []).filter((c) => {
-    if (!c) return false;
-    const username = (c.username || "").trim().toLowerCase();
-    if (!username || username === "undefined" || username === "channel" || username === "null") {
-      return false;
-    }
-    if (seenUsernames.has(username)) return false;
-    seenUsernames.add(username);
-    return Boolean(c.is_live || c.isLive);
-  });
 
   // Calculate total viewers (live channels only)
   const totalLiveViewers = carouselItems
@@ -241,16 +290,49 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#141416_1px,transparent_1px),linear-gradient(to_bottom,#141416_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-30 pointer-events-none" />
 
       {/* Header Container */}
-      <div className="relative mx-auto max-w-[1440px] px-6 pt-8 pb-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-[#1a1a1e] pb-4">
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#e5ff00]">// NETWORK TRANSMISSIONS</div>
-            <h1 className="mt-1 font-display text-2xl font-black uppercase tracking-tight text-white sm:text-3xl lg:text-4xl">
-              FEATURED BROADCASTS // <span className="text-[#e5ff00] font-sans italic">LIVE FEED</span>
-            </h1>
+      <div className="relative mx-auto max-w-[1440px] px-6 pt-8 pb-4 flex flex-col items-center">
+        {/* Centered Bannersnack Leaderboard Ad Container */}
+        <div className="w-full flex flex-col items-center justify-center mb-6">
+          <div className="font-mono text-[9px] uppercase tracking-[0.25em] text-[#e5ff00]/60 mb-2 text-center">// SPARKZ BROADCAST NETWORK // AD TRANSMISSION</div>
+          <div className="w-full max-w-[728px] overflow-x-auto scrollbar-none flex justify-center">
+            <div 
+              id="bannersnack-embed-container" 
+              className="w-[728px] h-[90px] shrink-0 bg-[#050507] border border-[#1c1c1f] shadow-[0_0_20px_rgba(0,0,0,0.8)] relative flex items-center justify-center"
+            />
+          </div>
+        </div>
+
+        {/* Lower Header Controls & Status */}
+        <div className="w-full flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-[#1a1a1e] pt-4">
+          {/* Left: High-energy terminal subgenre badge ticker */}
+          <div className="flex-1 max-w-xl">
+            <div className="flex items-center gap-3 overflow-hidden border border-[#e5ff00]/15 bg-[#050507] px-3.5 py-1.5 font-mono text-[10px] tracking-wider text-[#e5ff00] rounded-none shadow-[inset_0_0_10px_rgba(229,255,0,0.02)]">
+              <span className="shrink-0 bg-[#e5ff00] text-black px-1.5 py-0.5 font-black text-[8px] uppercase tracking-widest flex items-center gap-1">
+                <span className="h-1 w-1 bg-black rounded-full animate-pulse" />
+                SYSTEM GENRES
+              </span>
+              <div className="relative flex flex-1 overflow-hidden select-none">
+                <div className="flex w-max animate-marquee space-x-6 whitespace-nowrap">
+                  {["JUNGLE", "DRUM & BASS", "UK GARAGE", "DUBSTEP", "GRIME", "BASSLINE", "BREAKCORE", "SPEED GARAGE", "TECHNO", "SOUND SYSTEM"].map((genre, index) => (
+                    <span key={index} className="flex items-center gap-2 text-[9px] font-extrabold uppercase tracking-widest text-[#e5ff00]">
+                      <span>{genre}</span>
+                      <span className="text-zinc-700">//</span>
+                    </span>
+                  ))}
+                  {/* Repeated for continuous loop */}
+                  {["JUNGLE", "DRUM & BASS", "UK GARAGE", "DUBSTEP", "GRIME", "BASSLINE", "BREAKCORE", "SPEED GARAGE", "TECHNO", "SOUND SYSTEM"].map((genre, index) => (
+                    <span key={`dup-${index}`} className="flex items-center gap-2 text-[9px] font-extrabold uppercase tracking-widest text-[#e5ff00]">
+                      <span>{genre}</span>
+                      <span className="text-zinc-700">//</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          {/* Right: Active Viewers & Navigation Scroll Buttons */}
+          <div className="flex items-center gap-4 shrink-0 justify-between sm:justify-end">
             {isLoading ? (
               <div className="flex items-center gap-2 border border-[#27272a] bg-[#09090b] px-3.5 py-2 font-mono text-[10px] text-zinc-300">
                 <span className="relative flex h-2.5 w-2.5">
@@ -363,65 +445,193 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
         </div>
       ) : carouselItems.length === 0 ? (
         <div className="relative mx-auto max-w-[1440px] px-6 py-12" data-testid="carousel-empty-state">
-          <div className="border border-dashed border-[#27272a] bg-[#09090b]/40 p-12 text-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(229,255,0,0.03),transparent_60%)] pointer-events-none" />
-            <div className="relative z-10 flex flex-col items-center">
-              {/* Premium dark-themed cyber transmitter SVG illustration */}
-              <svg width="140" height="140" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="mb-4">
-                {/* Cyber Grid background circle */}
-                <circle cx="50" cy="50" r="48" stroke="#1f1f23" strokeWidth="1" strokeDasharray="3 3" />
-                <circle cx="50" cy="50" r="36" stroke="#141417" strokeWidth="1" />
-                <circle cx="50" cy="50" r="24" stroke="#141417" strokeWidth="1" />
+          <div className="border border-[#27272a] bg-[#070709] p-6 sm:p-8 relative overflow-hidden shadow-2xl">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(229,255,0,0.02),transparent_60%)] pointer-events-none" />
+            <div className="absolute top-0 right-0 p-3 font-mono text-[8px] text-zinc-600 tracking-widest select-none">// SYSTEM MODULE: standby_v0.9.1</div>
+            
+            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+              
+              {/* Column 1: Sound System Wall & Spinning Vinyl Deck (col-span-5) */}
+              <div className="lg:col-span-5 flex flex-col items-center justify-center border border-[#1c1c1f] bg-black/60 p-6 relative overflow-hidden select-none group">
+                {/* Speaker Grill Grid behind */}
+                <div className="absolute inset-0 bg-[radial-gradient(#141417_1px,transparent_1px)] [background-size:12px_12px] opacity-40 pointer-events-none" />
                 
-                {/* Crosshairs */}
-                <line x1="50" y1="2" x2="50" y2="98" stroke="#161619" strokeWidth="0.5" />
-                <line x1="2" y1="50" x2="98" y2="50" stroke="#161619" strokeWidth="0.5" />
+                {/* 3D Speaker Wall Aesthetic / Neon VU meter */}
+                <div className="w-full flex items-center justify-between mb-4 px-2 font-mono text-[8px] text-zinc-500">
+                  <span>DECK: A // STANDBY</span>
+                  <div className="flex gap-0.5 items-center">
+                    <span className="h-1.5 w-1 bg-[#e5ff00] animate-pulse" />
+                    <span className="h-2 w-1 bg-[#e5ff00]" />
+                    <span className="h-3 w-1 bg-[#e5ff00] animate-pulse" />
+                    <span className="h-1.5 w-1 bg-zinc-800" />
+                    <span className="h-1 w-1 bg-zinc-800" />
+                  </div>
+                </div>
 
-                {/* Outer Signal Waves */}
-                <path d="M25 45 C30 35, 70 35, 75 45" stroke="#27272a" strokeWidth="1.5" strokeLinecap="round" className="animate-pulse" />
-                <path d="M20 40 C30 25, 70 25, 80 40" stroke="#27272a" strokeWidth="1" strokeLinecap="round" strokeDasharray="2 2" />
-                
-                {/* Neon Active Signal Waves */}
-                <path d="M30 50 C35 42, 65 42, 70 50" stroke="#e5ff00" strokeWidth="2" strokeLinecap="round" className="animate-pulse" opacity="0.8" />
-                <path d="M35 55 C38 50, 62 50, 65 55" stroke="#e5ff00" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
+                {/* Pulsing Subwoofer and Spinning Vinyl Record Wrapper */}
+                <div className="relative h-44 w-44 flex items-center justify-center">
+                  {/* Outer speaker ring / glowing ripple */}
+                  <div className="absolute inset-0 rounded-full border border-[#e5ff00]/10 animate-ping opacity-25" />
+                  <div className="absolute inset-2 rounded-full border border-zinc-800 bg-[#0c0c0e] shadow-[0_0_20px_rgba(229,255,0,0.03)]" />
+                  
+                  {/* Spinning Vinyl Record */}
+                  <div className="relative h-32 w-32 rounded-full bg-[#111113] border-4 border-[#1c1c1f] flex items-center justify-center animate-[spin_8s_linear_infinite] group-hover:animate-[spin_2s_linear_infinite] transition-all duration-300 shadow-2xl cursor-pointer">
+                    {/* Vinyl grooves lines */}
+                    <div className="absolute inset-2 rounded-full border border-black/40" />
+                    <div className="absolute inset-4 rounded-full border border-black/40" />
+                    <div className="absolute inset-6 rounded-full border border-black/40" />
+                    <div className="absolute inset-8 rounded-full border border-black/40" />
+                    <div className="absolute inset-10 rounded-full border border-black/40" />
+                    
+                    {/* Vinyl center sticker label */}
+                    <div className="h-10 w-10 rounded-full bg-[#e5ff00] flex items-center justify-center p-1 text-center shadow-md border-2 border-black">
+                      <Disc className="h-4 w-4 text-black animate-spin" />
+                    </div>
+                  </div>
 
-                {/* Cyber Tower / Antenna structure */}
-                {/* Base stand */}
-                <path d="M40 85 L44 72 L56 72 L60 85" stroke="#3f3f46" strokeWidth="2" strokeLinejoin="round" />
-                <path d="M44 72 L47 55 L53 55 L56 72" stroke="#52525b" strokeWidth="1.5" strokeLinejoin="round" />
-                <line x1="44" y1="72" x2="56" y2="72" stroke="#52525b" strokeWidth="1" />
-                <line x1="47" y1="55" x2="53" y2="55" stroke="#71717a" strokeWidth="1" />
+                  {/* Tonearm overlay */}
+                  <svg className="absolute top-2 right-2 w-16 h-24 text-zinc-400 select-none pointer-events-none drop-shadow-lg" viewBox="0 0 64 96" fill="none">
+                    <path d="M52 10 L52 30 L20 70" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <circle cx="52" cy="10" r="4" fill="#ef4444" />
+                    <rect x="14" y="66" width="12" height="8" rx="1" fill="#27272a" stroke="currentColor" strokeWidth="1" />
+                  </svg>
+                </div>
 
-                {/* Cross beams inside tower */}
-                <line x1="40" y1="85" x2="56" y2="72" stroke="#27272a" strokeWidth="1" />
-                <line x1="60" y1="85" x2="44" y2="72" stroke="#27272a" strokeWidth="1" />
-                <line x1="44" y1="72" x2="53" y2="55" stroke="#27272a" strokeWidth="1" />
-                <line x1="56" y1="72" x2="47" y2="55" stroke="#27272a" strokeWidth="1" />
+                {/* Sub-bass power grid */}
+                <div className="mt-4 text-center">
+                  <div className="font-display text-sm font-black uppercase tracking-widest text-[#e5ff00] flex items-center gap-1.5 justify-center">
+                    <span className="h-2 w-2 rounded-full bg-[#e5ff00] animate-ping" />
+                    SPARKZ SUB-01 ACTIVE
+                  </div>
+                  <p className="mt-1 font-mono text-[8px] text-zinc-500 uppercase tracking-widest">
+                    Pulsing live sound system standby // Hover to spin vinyl faster
+                  </p>
+                </div>
 
-                {/* Main transmitter rod and emitter bulb */}
-                <line x1="50" y1="55" x2="50" y2="35" stroke="#e5ff00" strokeWidth="2" strokeLinecap="round" />
-                <circle cx="50" cy="35" r="4" fill="#000" stroke="#e5ff00" strokeWidth="2.5" className="animate-ping origin-center" style={{ transformOrigin: "50px 35px" }} />
-                <circle cx="50" cy="35" r="3" fill="#e5ff00" />
-                <circle cx="50" cy="35" r="1" fill="#fff" />
-                
-                {/* Status indicator glitch line at the bottom */}
-                <rect x="35" y="88" width="30" height="2" fill="#18181b" rx="1" />
-                <circle cx="50" cy="89" r="1.5" fill="#ef4444" className="animate-pulse" />
-              </svg>
-              <div className="font-display text-lg font-black uppercase tracking-wider text-zinc-400">
-                // NO ACTIVE TRANSMISSIONS
-              </div>
-              <p className="mt-2 font-mono text-[10px] text-zinc-500 uppercase tracking-widest max-w-md mx-auto">
-                The underground network is currently standby. Broadcast your own stream to go live.
-              </p>
-              <div className="mt-6">
-                <Link 
-                  to="/register" 
-                  className="inline-flex items-center gap-1.5 px-4 py-2 border border-[#e5ff00] bg-[#e5ff00]/5 text-[#e5ff00] font-mono text-[10px] font-bold uppercase tracking-wider hover:bg-[#e5ff00] hover:text-black transition-all"
+                {/* Interactive dub horn/hype siren button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const AudioContext = window.AudioContext || window.webkitAudioContext;
+                      if (!AudioContext) return;
+                      const ctx = new AudioContext();
+                      const osc = ctx.createOscillator();
+                      const gainNode = ctx.createGain();
+                      osc.type = "sawtooth";
+                      osc.frequency.setValueAtTime(140, ctx.currentTime);
+                      osc.frequency.exponentialRampToValueAtTime(580, ctx.currentTime + 0.3);
+                      osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.6);
+                      osc.frequency.exponentialRampToValueAtTime(580, ctx.currentTime + 0.9);
+                      osc.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 1.2);
+                      gainNode.gain.setValueAtTime(0, ctx.currentTime);
+                      gainNode.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.1);
+                      gainNode.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 1.0);
+                      gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
+                      osc.connect(gainNode);
+                      gainNode.connect(ctx.destination);
+                      osc.start();
+                      osc.stop(ctx.currentTime + 1.2);
+                      toast.success("🚨 SOUNDSYSTEM SIREN TRIGGERED! // HEAVYWEIGHT SIGNALS");
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                  }}
+                  className="mt-5 inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#e5ff00]/30 bg-black hover:border-[#e5ff00] hover:bg-[#e5ff00]/10 text-[#e5ff00] font-mono text-[9px] font-bold uppercase tracking-wider transition-all"
                 >
-                  <span>START BROADCASTING</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
+                  <Volume2 className="h-3.5 w-3.5 animate-bounce" />
+                  <span>TRIGGER HYPE SIREN 🚨</span>
+                </button>
+              </div>
+                       {/* Column 2: DJ Quick Start Guide OBS Terminal */}
+              <div className="lg:col-span-7 flex flex-col justify-between border border-[#1c1c1f] bg-[#0a0a0d] p-5 sm:p-6 font-mono text-xs">
+                {/* Terminal Header */}
+                <div className="border-b border-[#1c1c1f] pb-3 mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#e5ff00] font-bold">
+                    <Sparkles className="h-4 w-4 animate-pulse text-[#e5ff00]" />
+                    <span>// CREATOR BENEFITS // CLAIM YOUR FREQUENCY</span>
+                  </div>
+                  <span className="text-[9px] text-[#e5ff00]/60 uppercase tracking-widest hidden sm:inline">PERKS v1.0</span>
+                </div>
+
+                {/* Perks Content */}
+                <div className="space-y-4 flex-1">
+                  <p className="text-zinc-400 text-[11px] leading-relaxed mb-2 font-mono">
+                    We built <span className="text-[#e5ff00] font-bold">SPARKZ.TV</span> specifically for underground music curators, sound-system crews, and independent DJs. No algorithmic suppression. No DMCA muted VODs. Just pure high-fidelity transmission.
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {/* Perk 1: Vinyl Bits */}
+                    <div className="bg-black/40 border border-[#1c1c1f]/60 p-3 flex items-start gap-3 hover:border-[#e5ff00]/20 transition-colors">
+                      <div className="bg-[#e5ff00]/5 p-2 border border-[#e5ff00]/20 rounded-none shrink-0 text-[#e5ff00]">
+                        <Disc className="h-4 w-4 animate-pulse" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[#e5ff00] font-extrabold text-[10px] uppercase tracking-wider">
+                          100% TIP EARNINGS VIA VINYL BITS
+                        </div>
+                        <p className="text-zinc-500 text-[10px] leading-relaxed uppercase">
+                          Keep 100% of your support. Our micro-tipping system lets your community drop custom bits straight into your live mix.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Perk 2: Copyright preservation */}
+                    <div className="bg-black/40 border border-[#1c1c1f]/60 p-3 flex items-start gap-3 hover:border-[#e5ff00]/20 transition-colors">
+                      <div className="bg-[#e5ff00]/5 p-2 border border-[#e5ff00]/20 rounded-none shrink-0 text-[#e5ff00]">
+                        <Shield className="h-4 w-4" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[#e5ff00] font-extrabold text-[10px] uppercase tracking-wider">
+                          COPYRIGHT-FRIENDLY SOUND SYSTEM CULTURE
+                        </div>
+                        <p className="text-zinc-500 text-[10px] leading-relaxed uppercase">
+                          Streaming should be free of corporate filters. We protect your underground mixes from aggressive automated takedowns.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Perk 3: Instant Setup */}
+                    <div className="bg-black/40 border border-[#1c1c1f]/60 p-3 flex items-start gap-3 hover:border-[#e5ff00]/20 transition-colors">
+                      <div className="bg-[#e5ff00]/5 p-2 border border-[#e5ff00]/20 rounded-none shrink-0 text-[#e5ff00]">
+                        <Zap className="h-4 w-4" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[#e5ff00] font-extrabold text-[10px] uppercase tracking-wider">
+                          60-SECOND INSTANT SETUP
+                        </div>
+                        <p className="text-zinc-500 text-[10px] leading-relaxed uppercase">
+                          Direct RTMP/WHIP stream keys. Fire up OBS, Rekordbox, or Traktor and transmit live in high-fidelity 1080p stereo.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CTAs Footer Row */}
+                <div className="border-t border-[#1c1c1f] pt-4 mt-5 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+                  
+                  {/* Left Link for FAQ or Docs */}
+                  <Link
+                    to="/directory"
+                    className="inline-flex items-center gap-1 text-[9px] text-zinc-500 hover:text-[#e5ff00] uppercase tracking-widest font-bold"
+                  >
+                    <span>Browse Active Channels</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+
+                  {/* Primary & Secondary Action Button block */}
+                  <div className="flex gap-2">
+                    <Link
+                      to={user ? `/channel/${user.username || "djsparkz"}` : "/register"}
+                      className="btn-primary px-6 py-2.5 text-[10px] flex items-center justify-center gap-1.5 font-bold tracking-widest bg-[#e5ff00] text-black hover:bg-white transition-colors"
+                    >
+                      <span>{user ? "ENTER CREATOR DASHBOARD" : "CLAIM YOUR FREQUENCY (SIGN UP FREE)"}</span>
+                      <ArrowRight className="h-4 w-4 text-black" />
+                    </Link>
+                  </div>
+
+                </div>
               </div>
             </div>
           </div>

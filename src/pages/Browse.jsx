@@ -7,6 +7,8 @@ import { collection, onSnapshot } from "firebase/firestore";
 import ChannelCard from "@/components/ChannelCard";
 import Marquee from "@/components/Marquee";
 import StreamCarousel from "@/components/StreamCarousel";
+import StoriesSection from "@/components/StoriesSection";
+import ChatPanel from "@/components/ChatPanel";
 import SEO from "@/components/SEO";
 import { ArrowRight, Radio, Zap, Heart } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
@@ -275,8 +277,13 @@ export default function Browse() {
 
       <Marquee items={CATEGORIES.map((c) => c.toUpperCase())} />
 
+      {/* 24-Hour Transmissions Preview Strip */}
+      <StoriesSection />
+
       {/* Filters + Grid */}
       <section id="grid" className="mx-auto max-w-[1440px] px-6 pt-12 pb-24 sm:pb-28 lg:pb-32">
+        <div className="lg:grid lg:grid-cols-4 lg:gap-8 items-start">
+          <div className="lg:col-span-3 flex flex-col">
         <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <div className="label-caps">Signal Directory</div>
@@ -396,6 +403,23 @@ export default function Browse() {
             </div>
           </div>
         )}
+          </div>
+
+          {/* Right Column: Global Chat box (Lounge/Global room) */}
+          <div className="lg:col-span-1 mt-10 lg:mt-0 flex flex-col h-[580px] border border-[#27272a] bg-[#070709] shadow-2xl relative overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[#27272a]/60 bg-[#0c0c0e] px-4 py-3 font-mono text-xs font-bold tracking-widest text-[#e5ff00] select-none">
+              <div className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#e5ff00] animate-pulse" />
+                <span>GLOBAL CHAT // LOUNGE</span>
+              </div>
+              <span className="text-[8px] text-zinc-500 uppercase tracking-wider">LOBBY</span>
+            </div>
+            
+            <div className="flex-1 overflow-hidden flex flex-col bg-black/40">
+              <ChatPanel username="lounge" />
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );
