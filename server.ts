@@ -593,6 +593,53 @@ const localPayoutsStore: any[] = [];
 
 const activeViewersPerRoom = new Map<string, Set<string>>();
 const viewCache = new Map<string, number>();
+const activeStreamViewers = new Map<string, Map<string, number>>(); // channelId/username -> Map<ip, timestamp>
+
+function getStrictViewerCount(channelId: string, username: string): number {
+  const normalizedId = (channelId || "").toLowerCase().trim();
+  const normalizedUser = (username || "").toLowerCase().trim();
+  const now = Date.now();
+  const timeout = 45000; // 45 seconds timeout
+
+  // 1. Clean up and count active heartbeats for channelId
+  const heartbeatsId = activeStreamViewers.get(normalizedId);
+  if (heartbeatsId) {
+    for (const [ip, lastSeen] of heartbeatsId.entries()) {
+      if (now - lastSeen > timeout) {
+        heartbeatsId.delete(ip);
+      }
+    }
+  }
+
+  // 2. Clean up and count active heartbeats for username
+  const heartbeatsUser = activeStreamViewers.get(normalizedUser);
+  if (heartbeatsUser) {
+    for (const [ip, lastSeen] of heartbeatsUser.entries()) {
+      if (now - lastSeen > timeout) {
+        heartbeatsUser.delete(ip);
+      }
+    }
+  }
+
+  const heartbeatCount = Math.max(
+    heartbeatsId ? heartbeatsId.size : 0,
+    heartbeatsUser ? heartbeatsUser.size : 0
+  );
+
+  // 3. Match with websocket connections
+  const wsViewers = activeViewersPerRoom.get(normalizedUser) || activeViewersPerRoom.get(normalizedId);
+  const wsCount = wsViewers ? wsViewers.size : 0;
+
+  // If the stream is not live, viewer count must strictly be 0.
+  const matchedChannel = db.channels.get(channelId) || db.channels.get(username);
+  const isChannelLive = matchedChannel ? Boolean(matchedChannel.is_live || matchedChannel.isLive) : false;
+
+  if (!isChannelLive) {
+    return 0;
+  }
+
+  return Math.max(heartbeatCount, wsCount);
+}
 
 const storiesStore = new Map<string, any>();
 
@@ -655,8 +702,7 @@ function channelPublic(c: ChannelDoc, opts: { include_stream_key?: boolean, view
   const userUid = isMaster ? "nsU1v44XFnN3FloJvNePqj6cBG2" : (c.user_uid || "");
   const playbackId = c.playback_id || "";
 
-  const roomViewers = activeViewersPerRoom.get(username);
-  const trueViewerCount = roomViewers ? roomViewers.size : (c.viewer_count || 0);
+  const trueViewerCount = getStrictViewerCount(channelId, username);
 
   const out: Record<string, any> = {
     channel_id: channelId,
@@ -1282,7 +1328,7 @@ async function startServer() {
   api.put("/channels/mine", handleChannelUpdate);
   api.post("/channels/mine", handleChannelUpdate);
 
-  // Dynamic and robust IP-based channel view tracking with cooldown timers to prevent page refresh inflation
+  // Dynamic and robust IP-based channel view tracking with heartbeat registers and strict active IP detection
   api.post("/channels/:id/view", async (req: any, res: Response) => {
     try {
       const requestedId = req.params.id;
@@ -1305,54 +1351,38 @@ async function startServer() {
       const ip = (typeof clientIp === "string" ? clientIp.split(",")[0] : String(clientIp)).trim();
       
       const channelId = matchedChannel.channel_id || "djsparkz";
-      const cacheKey = `${channelId}:${ip}`;
-      const now = Date.now();
+      const normalizedChannelId = channelId.toLowerCase();
       
-      // Cooldown set to 5 minutes to prevent page refresh view inflation
-      const COOLDOWN_MS = 5 * 60 * 1000; 
-      
-      const lastViewTime = viewCache.get(cacheKey);
-      let incremented = false;
-
-      if (!lastViewTime || (now - lastViewTime) >= COOLDOWN_MS) {
-        viewCache.set(cacheKey, now);
-        // Increment count
-        matchedChannel.viewer_count = (matchedChannel.viewer_count || 0) + 1;
-        incremented = true;
-        console.log(`[View Tracker] IP ${ip} successfully tracked for channel ${channelId}. Count: ${matchedChannel.viewer_count}`);
-
-        // Persist to Firestore
-        const docId = matchedChannel.user_uid || matchedChannel.channel_id || matchedChannel.username;
-        if (docId) {
-          try {
-            const payload = {
-              viewer_count: matchedChannel.viewer_count,
-              last_updated: new Date().toISOString()
-            };
-            await setFirestoreDocSafe("channels", docId, payload, true);
-            
-            // Ensure master alias "djsparkz" doc is also in sync
-            if (normalizedId === "djsparkz" || matchedChannel.username === "djsparkz") {
-              await setFirestoreDocSafe("channels", "djsparkz", payload, true);
-            }
-          } catch (fsErr: any) {
-            console.error(`[View Tracker] Firestore update failed:`, sanitizeErrorMsg(fsErr.message));
-          }
-        }
-      } else {
-        const secondsRemaining = Math.ceil((COOLDOWN_MS - (now - lastViewTime)) / 1000);
-        console.log(`[View Tracker] Skipping view increment for IP ${ip} on channel ${channelId} (Cooldown active: ${secondsRemaining}s remaining)`);
+      // Register current IP address and timestamp
+      if (!activeStreamViewers.has(normalizedChannelId)) {
+        activeStreamViewers.set(normalizedChannelId, new Map());
       }
+      activeStreamViewers.get(normalizedChannelId)!.set(ip, Date.now());
 
-      // Calculate total viewers (incorporating websocket live occupants + base viewer count)
-      const roomName = matchedChannel.username || "djsparkz";
-      const roomViewers = activeViewersPerRoom.get(roomName);
-      const trueViewerCount = roomViewers ? roomViewers.size : (matchedChannel.viewer_count || 0);
+      const trueViewerCount = getStrictViewerCount(channelId, matchedChannel.username || "");
+      matchedChannel.viewer_count = trueViewerCount;
+
+      // Persist to Firestore to keep database in sync with real-time strict count
+      const docId = matchedChannel.user_uid || matchedChannel.channel_id || matchedChannel.username;
+      if (docId) {
+        try {
+          const payload = {
+            viewer_count: trueViewerCount,
+            last_updated: new Date().toISOString()
+          };
+          await setFirestoreDocSafe("channels", docId, payload, true);
+          
+          if (normalizedId === "djsparkz" || matchedChannel.username === "djsparkz") {
+            await setFirestoreDocSafe("channels", "djsparkz", payload, true);
+          }
+        } catch (fsErr: any) {
+          console.error(`[View Tracker] Firestore update failed:`, sanitizeErrorMsg(fsErr.message));
+        }
+      }
 
       return res.json({ 
         success: true, 
         viewer_count: trueViewerCount, 
-        incremented,
         ip_tracked: ip
       });
     } catch (err: any) {
@@ -2273,6 +2303,27 @@ async function startServer() {
 
   api.post("/users/me/social-share", authMiddleware, upload.single("photo"), handleSocialShareUpload);
   api.put("/users/me/social-share", authMiddleware, upload.single("photo"), handleSocialShareUpload);
+
+  api.post("/channels/mine/schedule-banner", upload.single("thumbnail"), async (req, res) => {
+    try {
+      let bannerUrl = null;
+      if (req.file) {
+        bannerUrl = `/api/files/${req.file.filename}`;
+      } else if (req.body?.thumbnail || req.body?.image || req.body?.file) {
+        bannerUrl = req.body.thumbnail || req.body.image || req.body.file;
+      }
+
+      bannerUrl = saveBase64ToUploads(bannerUrl);
+
+      return res.json({
+        success: true,
+        thumbnail_url: bannerUrl,
+        thumbnailUrl: bannerUrl,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to upload schedule banner", details: err.message });
+    }
+  });
 
   api.post("/channels/mine/thumbnail", upload.single("thumbnail"), async (req, res) => {
     try {

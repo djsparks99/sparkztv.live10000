@@ -71,7 +71,7 @@ export default function ScheduleManager({ channel, onChange }) {
     }
 
     try {
-      const { data } = await api.post("/channels/mine/thumbnail", formData, {
+      const { data } = await api.post("/channels/mine/schedule-banner", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       if (data?.thumbnail_url) {
