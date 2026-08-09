@@ -267,7 +267,7 @@ export default function StreamCarousel({ allChannels = [], channels = [], isLoad
               className="w-[728px] h-[90px] shrink-0 bg-[#050507] border border-[#1c1c1f] shadow-[0_0_20px_rgba(0,0,0,0.8)] relative overflow-hidden"
             >
               <iframe
-                src="//cdn.bannersnack.com/banners/bdun0xvdy/embed/index.html?userId=35786041&t=1786233694"
+                src="//cdn.bannersnack.com/banners/bdun0xvdy/embed/index.html?userId=35786041&t=1786237229"
                 width="100%"
                 height="100%"
                 scrolling="no"
