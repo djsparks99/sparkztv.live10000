@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api, fileUrl } from "@/lib/api";
-import { db } from "@/lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import { db, auth } from "@/lib/firebase";
+import { doc, onSnapshot, collection, setDoc } from "firebase/firestore";
+import { toast } from "sonner";
 import HlsPlayer from "@/components/HlsPlayer";
 import ChatPanel from "@/components/ChatPanel";
 import FollowButton from "@/components/FollowButton";
@@ -14,15 +15,94 @@ import LiveDuration from "@/components/LiveDuration";
 import UserLocationTime from "@/components/UserLocationTime";
 import SEO from "@/components/SEO";
 import { useAuth } from "@/lib/auth-context";
-import { Eye, ArrowLeft, User, Clock, QrCode, Coins } from "lucide-react";
+import { Eye, ArrowLeft, User, Clock, QrCode, Coins, Flag } from "lucide-react";
 import { useLivepeerAutoPoll } from "@/hooks/useLivepeerAutoPoll";
 import { QRCodeSVG } from "qrcode.react";
+
+const OperationType = {
+  CREATE: "create",
+  UPDATE: "update",
+  DELETE: "delete",
+  LIST: "list",
+  GET: "get",
+  WRITE: "write",
+};
+
+function handleFirestoreError(error, operationType, path) {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error("Firestore Error: ", JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export default function Channel() {
   const { username } = useParams();
   const { user } = useAuth();
   const [channel, setChannel] = useState(null);
   const [notFound, setNotFound] = useState(false);
+
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
+  const handleReportSubmit = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      toast.error("Please log in to submit a community moderation report.");
+      return;
+    }
+    if (!reportReason) {
+      toast.error("Please select a reason for reporting.");
+      return;
+    }
+
+    setIsSubmittingReport(true);
+    const pathForWrite = "moderation_reports";
+    try {
+      const reportRef = doc(collection(db, pathForWrite));
+      const reportId = reportRef.id;
+
+      const reportData = {
+        id: reportId,
+        reporter_uid: user.uid,
+        reporter_username: user.username || "anonymous",
+        reported_stream_id: channel.playback_id || "unknown",
+        reported_username: channel.username,
+        reason: reportReason,
+        details: reportDetails.trim(),
+        status: "pending",
+        created_at: new Date().toISOString()
+      };
+
+      await setDoc(reportRef, reportData);
+      toast.success("Flag submitted successfully.", {
+        description: "Our moderation team has been notified."
+      });
+      setIsReportModalOpen(false);
+      setReportReason("");
+      setReportDetails("");
+    } catch (error) {
+      toast.error("Failed to submit report. Please try again.");
+      handleFirestoreError(error, OperationType.WRITE, pathForWrite);
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
 
   useLivepeerAutoPoll(username);
 
@@ -208,7 +288,19 @@ export default function Channel() {
 
       <div className="grid gap-6 lg:grid-cols-12">
         <div className="lg:col-span-8 flex flex-col gap-6">
-          <HlsPlayer playbackId={channel.playback_id} isLive={isLive} />
+          <div className="flex flex-col gap-2">
+            <HlsPlayer playbackId={channel.playback_id} isLive={isLive} />
+            <div className="flex justify-end">
+              <button
+                onClick={() => setIsReportModalOpen(true)}
+                className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500 hover:text-red-400 transition-colors uppercase tracking-widest px-2 py-1"
+                title="Report this broadcast for community guidelines violations"
+              >
+                <Flag className="h-3 w-3" />
+                <span>Report Broadcast</span>
+              </button>
+            </div>
+          </div>
 
           <div className="border border-[#27272a] bg-[#0a0a0a] p-6">
             <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
@@ -378,6 +470,103 @@ export default function Channel() {
           </div>
         </aside>
       </div>
+
+      {isReportModalOpen && (
+        <div
+          data-testid="report-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+        >
+          <div className="w-full max-w-md border border-[#27272a] bg-[#0a0a0a] p-6 shadow-2xl sm:p-8 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-red-500">
+              <Flag className="h-4 w-4 text-red-500" />
+              // REPORT BROADCAST
+            </div>
+            <h2 className="mt-2 font-display text-2xl font-black uppercase text-white sm:text-3xl">
+              COMMUNITY FLAG
+            </h2>
+            <p className="mt-2 text-xs text-zinc-400">
+              Help us keep the airwaves safe. Let us know if <span className="text-[#e5ff00] font-bold">@{channel.username}</span> is in violation of our community standards.
+            </p>
+
+            {!user ? (
+              <div className="mt-6 space-y-4 text-center">
+                <p className="font-mono text-xs text-red-400 uppercase">
+                  You must be signed in to submit a community moderation report.
+                </p>
+                <Link
+                  to="/login"
+                  className="btn-primary w-full flex items-center justify-center py-2.5 text-xs text-black font-bold font-mono tracking-wider bg-[#e5ff00] hover:bg-white transition-colors"
+                >
+                  SIGN IN TO CONTINUE
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setIsReportModalOpen(false)}
+                  className="w-full border border-zinc-700 bg-black py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
+                >
+                  CLOSE
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleReportSubmit} className="mt-6 space-y-4">
+                <div>
+                  <label className="label-caps mb-1 block text-zinc-300">
+                    REASON FOR REPORTING
+                  </label>
+                  <select
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value)}
+                    className="w-full text-white bg-black border border-[#27272a] p-2 rounded-none font-mono text-xs focus:border-[#e5ff00] focus:outline-none"
+                    required
+                  >
+                    <option value="" disabled>-- Select a reason --</option>
+                    <option value="harassment">Harassment / Hate Speech</option>
+                    <option value="explicit">Explicit / Adult Content</option>
+                    <option value="copyright">Copyright Violation</option>
+                    <option value="spam">Spam / Scam / Phishing</option>
+                    <option value="guidelines">General Guidelines Violation</option>
+                    <option value="other">Other / Custom Details</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label-caps mb-1 block text-zinc-300">
+                    ADDITIONAL DETAILS (OPTIONAL)
+                  </label>
+                  <textarea
+                    value={reportDetails}
+                    onChange={(e) => setReportDetails(e.target.value)}
+                    className="w-full text-white bg-black border border-[#27272a] p-2 rounded-none font-mono text-xs focus:border-[#e5ff00] focus:outline-none h-24 resize-none"
+                    placeholder="Provide timestamps or specific details..."
+                    maxLength={500}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsReportModalOpen(false);
+                      setReportReason("");
+                      setReportDetails("");
+                    }}
+                    className="flex-1 border border-zinc-700 bg-black py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
+                  >
+                    CANCEL
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReport}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2.5 font-mono text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                  >
+                    {isSubmittingReport ? "SUBMITTING..." : "SUBMIT FLAG"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -180,6 +180,27 @@
         "caption": { "type": "string", "required": false },
         "created_at": { "type": "string", "required": true }
       }
+    },
+    "moderation_reports": {
+      "path": "moderation_reports/{reportId}",
+      "description": "Community moderation and user content flags",
+      "allow": {
+        "read": "request.auth != null && (resource.data.reporter_uid == request.auth.uid || request.auth.token.email == 'markysparks99@gmail.com')",
+        "create": "request.auth != null",
+        "update": "request.auth != null && request.auth.token.email == 'markysparks99@gmail.com'",
+        "delete": "false"
+      },
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "reporter_uid": { "type": "string", "required": true },
+        "reporter_username": { "type": "string", "required": true },
+        "reported_stream_id": { "type": "string", "required": true },
+        "reported_username": { "type": "string", "required": true },
+        "reason": { "type": "string", "required": true },
+        "details": { "type": "string", "required": false },
+        "status": { "type": "string", "required": true },
+        "created_at": { "type": "string", "required": true }
+      }
     }
   }
 }
